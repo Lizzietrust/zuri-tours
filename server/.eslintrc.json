@@ -29,17 +29,28 @@
       "ignorePackages",
       {
         "js": "always",
-        "mjs": "always"
+        "mjs": "always",
+        "cjs": "always"
       }
     ],
     "import/prefer-default-export": "off",
     "import/no-extraneous-dependencies": [
       "error",
       {
-        "devDependencies": ["**/*.test.js", "**/*.spec.js", "**/scripts/**"],
-        "optionalDependencies": false
+        "devDependencies": [
+          "**/*.test.js",
+          "**/*.spec.js",
+          "**/*.config.js",
+          "**/config/*.js",
+          "**/scripts/*.js",
+          "**/*.setup.js"
+        ],
+        "optionalDependencies": false,
+        "peerDependencies": false
       }
     ],
+    "import/no-unresolved": "off",
+    "import/no-import-module-exports": "off",
 
     // ===== GENERAL RULES =====
     "no-console": "off",
@@ -61,6 +72,7 @@
         "props": false
       }
     ],
+    "no-shadow": "off",
     "no-restricted-syntax": [
       "error",
       {
@@ -101,7 +113,6 @@
         "ignoreTemplateLiterals": true
       }
     ],
-
     "no-multiple-empty-lines": [
       "warn",
       {
@@ -128,12 +139,7 @@
       },
       { "blankLine": "always", "prev": "directive", "next": "*" },
       { "blankLine": "any", "prev": "directive", "next": "directive" }
-    ],
-
-    // ===== AIRBNB OVERRIDES =====
-    "import/no-unresolved": "off",
-    "import/no-import-module-exports": "off",
-    "no-shadow": "off"
+    ]
   },
   "settings": {
     "import/resolver": {
