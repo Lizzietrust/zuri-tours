@@ -1,7 +1,4 @@
-// controllers/userController.js
-
-// Sample in-memory data (replace with database later)
-let users = [
+const users = [
   {
     id: 1,
     name: "John Doe",
@@ -22,11 +19,11 @@ let users = [
   },
 ];
 
-// Get all users
 export const getAllUsers = (req, res) => {
   try {
-    // Filter out password field for security
-    const usersWithoutPassword = users.map(({ password, ...user }) => user);
+    const usersWithoutPassword = users.map(
+      ({ password: _password, ...user }) => user,
+    );
 
     res.status(200).json({
       status: "success",
@@ -43,10 +40,9 @@ export const getAllUsers = (req, res) => {
   }
 };
 
-// Get a single user by ID
 export const getUser = (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = req.parsedId;
     const user = users.find((u) => u.id === id);
 
     if (!user) {
@@ -56,8 +52,7 @@ export const getUser = (req, res) => {
       });
     }
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = user;
+    const { password: _password, ...userWithoutPassword } = user;
 
     res.status(200).json({
       status: "success",
@@ -73,21 +68,19 @@ export const getUser = (req, res) => {
   }
 };
 
-// Create a new user
 export const createUser = (req, res) => {
   try {
-    const { name, email, password, role = "user" } = req.body;
+    const { name, email, password: _password, role = "user" } = req.body;
 
-    // Validation
-    if (!name || !email || !password) {
+    if (!name || !email || !_password) {
       return res.status(400).json({
         status: "fail",
         message: "Please provide name, email, and password",
       });
     }
 
-    // Check if email already exists
     const existingUser = users.find((u) => u.email === email);
+
     if (existingUser) {
       return res.status(409).json({
         status: "fail",
@@ -99,7 +92,7 @@ export const createUser = (req, res) => {
       id: users.length > 0 ? Math.max(...users.map((u) => u.id)) + 1 : 1,
       name,
       email,
-      password: `hashed_${password}`, // In real app, use bcrypt to hash
+      password: `hashed_${_password}`,
       role,
       active: true,
       createdAt: new Date().toISOString(),
@@ -107,8 +100,7 @@ export const createUser = (req, res) => {
 
     users.push(newUser);
 
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = newUser;
+    const { password: __password, ...userWithoutPassword } = newUser;
 
     res.status(201).json({
       status: "success",
@@ -124,10 +116,9 @@ export const createUser = (req, res) => {
   }
 };
 
-// Update a user (PATCH - partial update)
 export const updateUser = (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = req.parsedId;
     const userIndex = users.findIndex((u) => u.id === id);
 
     if (userIndex === -1) {
@@ -137,18 +128,15 @@ export const updateUser = (req, res) => {
       });
     }
 
-    // Prevent updating sensitive fields
-    const { id: _, password, ...updateData } = req.body;
+    const { id: _id, password: _password, ...updateData } = req.body;
 
-    // Update user
     users[userIndex] = {
       ...users[userIndex],
       ...updateData,
-      id: users[userIndex].id, // Keep original ID
+      id: users[userIndex].id,
     };
 
-    // Remove password from response
-    const { password: pwd, ...userWithoutPassword } = users[userIndex];
+    const { password: __password, ...userWithoutPassword } = users[userIndex];
 
     res.status(200).json({
       status: "success",
@@ -164,10 +152,9 @@ export const updateUser = (req, res) => {
   }
 };
 
-// Delete a user (soft delete)
 export const deleteUser = (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = req.parsedId;
     const userIndex = users.findIndex((u) => u.id === id);
 
     if (userIndex === -1) {
@@ -177,10 +164,6 @@ export const deleteUser = (req, res) => {
       });
     }
 
-    // Hard delete - remove completely
-    // users.splice(userIndex, 1);
-
-    // Soft delete - mark as inactive (recommended)
     users[userIndex] = {
       ...users[userIndex],
       active: false,
