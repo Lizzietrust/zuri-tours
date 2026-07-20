@@ -11,7 +11,7 @@ const tourSchema = new mongoose.Schema(
     },
     slug: {
       type: String,
-      unique: true,
+      // unique: true,
     },
     duration: {
       type: Number,
@@ -82,7 +82,6 @@ const tourSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-
     guides: [
       {
         type: mongoose.Schema.ObjectId,
@@ -104,11 +103,17 @@ tourSchema.virtual("reviews", {
 });
 
 tourSchema.pre("save", function preSaveMiddleware(next) {
-  this.slug = this.name
-    .toLowerCase()
-    .replace(/[^a-zA-Z0-9]/g, "-")
-    .replace(/-+/g, "-");
-  next();
+  try {
+    if (this.name && !this.slug) {
+      this.slug = this.name
+        .toLowerCase()
+        .replace(/[^a-zA-Z0-9]/g, "-")
+        .replace(/-+/g, "-");
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 tourSchema.index({ price: 1, ratingsAverage: -1 });
