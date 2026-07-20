@@ -1,0 +1,47 @@
+[
+  {
+    "name": "The Forest Hiker",
+    "slug": "the-forest-hiker",
+    "duration": 5,
+    "maxGroupSize": 25,
+    "difficulty": "easy",
+    "price": 397,
+    "priceDiscount": 297,
+    "summary": "Breathtaking hike through the Canadian Rocky Mountains",
+    "description": "This 5-day adventure takes you through some of the most spectacular scenery on earth. You'll hike through dense forests, cross crystal-clear streams, and camp under the stars.",
+    "imageCover": "forest-hiker-cover.jpg",
+    "images": ["forest-1.jpg", "forest-2.jpg", "forest-3.jpg"],
+    "startDates": ["2026-08-15", "2026-09-01", "2026-09-20"],
+    "guides": []
+  },
+  {
+    "name": "The Sea Explorer",
+    "slug": "the-sea-explorer",
+    "duration": 7,
+    "maxGroupSize": 15,
+    "difficulty": "medium",
+    "price": 497,
+    "priceDiscount": 397,
+    "summary": "Exploring the pristine coastline of the Pacific Northwest",
+    "description": "Join us for a 7-day sea kayaking expedition through hidden fjords, remote islands, and abundant wildlife. Perfect for nature lovers and photography enthusiasts.",
+    "imageCover": "sea-explorer-cover.jpg",
+    "images": ["sea-1.jpg", "sea-2.jpg", "sea-3.jpg"],
+    "startDates": ["2026-07-10", "2026-08-05", "2026-09-15"],
+    "guides": []
+  },
+  {
+    "name": "The Snow Adventurer",
+    "slug": "the-snow-adventurer",
+    "duration": 4,
+    "maxGroupSize": 10,
+    "difficulty": "difficult",
+    "price": 897,
+    "priceDiscount": 697,
+    "summary": "Extreme winter trekking in the Swiss Alps",
+    "description": "This challenging 4-day expedition is for experienced winter trekkers only. You'll navigate through deep snow, climb frozen waterfalls, and sleep in mountain huts at high altitude.",
+    "imageCover": "snow-adventurer-cover.jpg",
+    "images": ["snow-1.jpg", "snow-2.jpg", "snow-3.jpg"],
+    "startDates": ["2026-12-10", "2027-01-15", "2027-02-20"],
+    "guides": []
+  }
+]
