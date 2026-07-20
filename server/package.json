@@ -13,7 +13,11 @@
     "lint": "eslint . --ext .js,.mjs,.cjs",
     "lint:fix": "eslint . --ext .js,.mjs,.cjs --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "import-data": "node scripts/import-data.js",
+    "seed": "node scripts/seed.js",
+    "seed:dev": "NODE_ENV=development node scripts/seed.js --force",
+    "delete-data": "node scripts/import-data.js --delete"
   },
   "keywords": [
     "tours",
