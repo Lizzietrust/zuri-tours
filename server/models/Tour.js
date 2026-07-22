@@ -255,6 +255,206 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
         .replace(/[^a-zA-Z0-9]/g, "-")
         .replace(/-+/g, "-");
     }
+
+    if (this.startDates && this.startDates.length > 0) {
+      this.startDates = this.startDates
+        .filter((date) => date instanceof Date && !Number.isNaN(date.getTime()))
+        .sort((a, b) => a - b);
+    }
+
+    if (this.description) {
+      this.description = this.description.trim().replace(/\s+/g, " ");
+    }
+
+    if (this.images && this.images.length > 0) {
+      this.images = [...new Set(this.images)];
+    }
+
+    if (this.priceDiscount && this.priceDiscount >= this.price) {
+      throw new Error("Discount price must be below regular price");
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.post("save", function postSaveMiddleware(doc, next) {
+  try {
+    console.log(
+      `📝 Tour "${doc.name}" has been ${doc.isNew ? "created" : "updated"}`,
+    );
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("validate", function preValidateMiddleware(next) {
+  try {
+    if (this.duration && this.duration < 1) {
+      this.duration = 1;
+    }
+
+    if (this.maxGroupSize && this.maxGroupSize > 50) {
+      this.maxGroupSize = 50;
+    }
+
+    if (this.price && (this.price < 0 || this.price > 100000)) {
+      throw new Error("Price must be between 0 and 100,000");
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("remove", async function preRemoveMiddleware(next) {
+  try {
+    const Review = mongoose.model("Review");
+
+    await Review.deleteMany({ tour: this._id });
+
+    const Booking = mongoose.model("Booking");
+
+    await Booking.deleteMany({ tour: this._id });
+
+    console.log(`🗑️ Tour "${this.name}" and all related data removed`);
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre(
+  "findOneAndDelete",
+  async function preFindOneAndDeleteMiddleware(next) {
+    try {
+      const doc = await this.model.findOne(this.getFilter());
+
+      if (doc) {
+        this._doc = doc;
+
+        const Review = mongoose.model("Review");
+
+        await Review.deleteMany({ tour: doc._id });
+
+        const Booking = mongoose.model("Booking");
+
+        await Booking.deleteMany({ tour: doc._id });
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+tourSchema.post(
+  "findOneAndDelete",
+  function postFindOneAndDeleteMiddleware(doc, next) {
+    try {
+      if (doc) {
+        console.log(
+          `🗑️ Tour "${doc.name}" and all related data deleted via findOneAndDelete`,
+        );
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+tourSchema.pre("find", function preFindMiddleware(next) {
+  try {
+    if (!this._sort) {
+      this.sort({ createdAt: -1 });
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.post("find", function postFindMiddleware(docs, next) {
+  try {
+    console.log(`🔍 Found ${docs.length} tours`);
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("findOne", function preFindOneMiddleware(next) {
+  try {
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.post("init", function postInitMiddleware() {
+  try {
+    // This runs when a document is loaded from the database
+    // You can add computed properties or transformations here
+    // console.log(`📄 Tour "${doc.name}" loaded from database`);
+  } catch (error) {
+    // Silent fail for init middleware
+  }
+});
+
+tourSchema.pre("updateOne", function preUpdateOneMiddleware(next) {
+  try {
+    const update = this.getUpdate();
+
+    if (update.$set) {
+      delete update.$set._id;
+
+      if (update.$set.priceDiscount && update.$set.price) {
+        if (update.$set.priceDiscount >= update.$set.price) {
+          throw new Error("Discount price must be below regular price");
+        }
+      }
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.post("updateOne", function postUpdateOneMiddleware(res, next) {
+  try {
+    console.log(`📝 Tour updated: ${res.modifiedCount} document(s) modified`);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("updateMany", function preUpdateManyMiddleware(next) {
+  try {
+    const update = this.getUpdate();
+
+    if (update.$set && update.$set.price) {
+      // Add additional validation here
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("aggregate", function preAggregateMiddleware(next) {
+  try {
     next();
   } catch (error) {
     next(error);
@@ -266,6 +466,7 @@ tourSchema.index({ slug: 1 });
 tourSchema.index({ startDates: 1 });
 tourSchema.index({ difficulty: 1 });
 tourSchema.index({ duration: 1 });
+tourSchema.index({ name: "text", summary: "text", description: "text" });
 
 const Tour = mongoose.model("Tour", tourSchema);
 
