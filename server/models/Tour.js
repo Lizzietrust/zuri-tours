@@ -1,4 +1,4 @@
-import mongoose from "mongoose"; // eslint-disable-line import/no-extraneous-dependencies
+import mongoose from "mongoose";
 
 const tourSchema = new mongoose.Schema(
   {
@@ -88,6 +88,135 @@ const tourSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    featured: {
+      type: Boolean,
+      default: false,
+    },
+    category: {
+      type: String,
+      enum: ["adventure", "cultural", "nature", "city", "beach", "mountain"],
+      default: "adventure",
+    },
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        default: [0, 0],
+      },
+      address: String,
+      description: String,
+    },
+    included: [String],
+    excluded: [String],
+    itinerary: [
+      {
+        day: Number,
+        title: String,
+        description: String,
+        activities: [String],
+        meals: {
+          breakfast: Boolean,
+          lunch: Boolean,
+          dinner: Boolean,
+        },
+        accommodation: String,
+      },
+    ],
+    cancellationPolicy: {
+      freeCancellation: {
+        type: Boolean,
+        default: true,
+      },
+      deadlineDays: {
+        type: Number,
+        default: 7,
+      },
+      refundPercentage: {
+        type: Number,
+        default: 100,
+        min: 0,
+        max: 100,
+      },
+    },
+    languages: [String],
+    minimumAge: {
+      type: Number,
+      default: 0,
+    },
+    maximumAltitude: {
+      type: Number,
+    },
+    physicalRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 3,
+    },
+
+    isSecret: {
+      type: Boolean,
+      default: false,
+    },
+    secretCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+    secretAccessLevel: {
+      type: String,
+      enum: ["vip", "premium", "staff", "admin", "public"],
+      default: "public",
+    },
+    secretReleaseDate: {
+      type: Date,
+    },
+    secretExpiryDate: {
+      type: Date,
+    },
+    secretMaxBookings: {
+      type: Number,
+      default: 10,
+    },
+    secretBookings: {
+      type: Number,
+      default: 0,
+    },
+    secretWhitelist: [
+      {
+        userId: {
+          type: mongoose.Schema.ObjectId,
+          ref: "User",
+        },
+        email: String,
+        accessGrantedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        accessExpiresAt: Date,
+      },
+    ],
+    secretViewCount: {
+      type: Number,
+      default: 0,
+    },
+    secretLastViewed: Date,
+    secretMetadata: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+    },
+    isSecretArchived: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -132,7 +261,9 @@ tourSchema.virtual("pricePerDay").get(function getPricePerDay() {
 });
 
 tourSchema.virtual("discountPercentage").get(function getDiscountPercentage() {
-  if (!this.priceDiscount || this.priceDiscount === 0) return 0;
+  if (!this.priceDiscount || this.priceDiscount === 0) {
+    return 0;
+  }
 
   return Math.round(((this.price - this.priceDiscount) / this.price) * 100);
 });
@@ -148,10 +279,18 @@ tourSchema.virtual("isOnSale").get(function getIsOnSale() {
 tourSchema.virtual("ratingStatus").get(function getRatingStatus() {
   const rating = this.ratingsAverage;
 
-  if (rating >= 4.7) return "Excellent ⭐⭐⭐⭐⭐";
-  if (rating >= 4.3) return "Very Good ⭐⭐⭐⭐";
-  if (rating >= 3.8) return "Good ⭐⭐⭐";
-  if (rating >= 3.0) return "Average ⭐⭐";
+  if (rating >= 4.7) {
+    return "Excellent ⭐⭐⭐⭐⭐";
+  }
+  if (rating >= 4.3) {
+    return "Very Good ⭐⭐⭐⭐";
+  }
+  if (rating >= 3.8) {
+    return "Good ⭐⭐⭐";
+  }
+  if (rating >= 3.0) {
+    return "Average ⭐⭐";
+  }
 
   return "Below Average ⭐";
 });
@@ -161,7 +300,9 @@ tourSchema.virtual("reviewCount").get(function getReviewCount() {
 });
 
 tourSchema.virtual("computedRating").get(function getComputedRating() {
-  if (!this.reviews || this.reviews.length === 0) return 0;
+  if (!this.reviews || this.reviews.length === 0) {
+    return 0;
+  }
   const total = this.reviews.reduce((sum, review) => sum + review.rating, 0);
 
   return Math.round((total / this.reviews.length) * 10) / 10;
@@ -174,14 +315,18 @@ tourSchema.virtual("reviews", {
 });
 
 tourSchema.virtual("upcomingStartDates").get(function getUpcomingStartDates() {
-  if (!this.startDates || this.startDates.length === 0) return [];
+  if (!this.startDates || this.startDates.length === 0) {
+    return [];
+  }
   const now = new Date();
 
   return this.startDates.filter((date) => date >= now).sort((a, b) => a - b);
 });
 
 tourSchema.virtual("pastStartDates").get(function getPastStartDates() {
-  if (!this.startDates || this.startDates.length === 0) return [];
+  if (!this.startDates || this.startDates.length === 0) {
+    return [];
+  }
   const now = new Date();
 
   return this.startDates.filter((date) => date < now).sort((a, b) => b - a);
@@ -247,131 +392,270 @@ tourSchema.virtual("durationInUnits").get(function getDurationInUnits() {
   };
 });
 
-tourSchema.pre("save", function preSaveMiddleware(next) {
-  try {
-    if (this.name && !this.slug) {
-      this.slug = this.name
-        .toLowerCase()
-        .replace(/[^a-zA-Z0-9]/g, "-")
-        .replace(/-+/g, "-");
-    }
-
-    if (this.startDates && this.startDates.length > 0) {
-      this.startDates = this.startDates
-        .filter((date) => date instanceof Date && !Number.isNaN(date.getTime()))
-        .sort((a, b) => a - b);
-    }
-
-    if (this.description) {
-      this.description = this.description.trim().replace(/\s+/g, " ");
-    }
-
-    if (this.images && this.images.length > 0) {
-      this.images = [...new Set(this.images)];
-    }
-
-    if (this.priceDiscount && this.priceDiscount >= this.price) {
-      throw new Error("Discount price must be below regular price");
-    }
-
-    next();
-  } catch (error) {
-    next(error);
-  }
+tourSchema.virtual("itineraryDays").get(function getItineraryDays() {
+  return this.itinerary ? this.itinerary.length : 0;
 });
 
-tourSchema.post("save", function postSaveMiddleware(doc, next) {
-  try {
-    console.log(
-      `📝 Tour "${doc.name}" has been ${doc.isNew ? "created" : "updated"}`,
+tourSchema.virtual("includedItems").get(function getIncludedItems() {
+  return this.included || [];
+});
+
+tourSchema.virtual("excludedItems").get(function getExcludedItems() {
+  return this.excluded || [];
+});
+
+tourSchema.virtual("isSecretAvailable").get(function getIsSecretAvailable() {
+  if (!this.isSecret) {
+    return false;
+  }
+  if (this.isSecretArchived) {
+    return false;
+  }
+
+  const now = new Date();
+
+  if (this.secretExpiryDate && this.secretExpiryDate < now) {
+    return false;
+  }
+  if (this.secretReleaseDate && this.secretReleaseDate > now) {
+    return false;
+  }
+
+  return this.secretBookings < this.secretMaxBookings;
+});
+
+tourSchema
+  .virtual("secretRemainingSlots")
+  .get(function getSecretRemainingSlots() {
+    if (!this.isSecret) {
+      return 0;
+    }
+
+    return Math.max(0, this.secretMaxBookings - this.secretBookings);
+  });
+
+tourSchema
+  .virtual("secretAvailabilityPercentage")
+  .get(function getSecretAvailabilityPercentage() {
+    if (!this.isSecret || this.secretMaxBookings === 0) {
+      return 0;
+    }
+
+    return Math.round(
+      (this.secretRemainingSlots / this.secretMaxBookings) * 100,
     );
+  });
 
-    next();
-  } catch (error) {
-    next(error);
+tourSchema.virtual("isSecretExpired").get(function getIsSecretExpired() {
+  if (!this.isSecret) {
+    return false;
   }
+  if (this.isSecretArchived) {
+    return true;
+  }
+
+  const now = new Date();
+
+  if (this.secretExpiryDate && this.secretExpiryDate < now) {
+    return true;
+  }
+
+  return this.secretBookings >= this.secretMaxBookings;
 });
 
-tourSchema.pre("validate", function preValidateMiddleware(next) {
-  try {
-    if (this.duration && this.duration < 1) {
-      this.duration = 1;
-    }
-
-    if (this.maxGroupSize && this.maxGroupSize > 50) {
-      this.maxGroupSize = 50;
-    }
-
-    if (this.price && (this.price < 0 || this.price > 100000)) {
-      throw new Error("Price must be between 0 and 100,000");
-    }
-
-    next();
-  } catch (error) {
-    next(error);
+tourSchema.virtual("secretStatus").get(function getSecretStatus() {
+  if (!this.isSecret) {
+    return "Not a secret tour";
   }
+  if (this.isSecretArchived) {
+    return "Archived";
+  }
+  if (this.isSecretExpired) {
+    return "Expired";
+  }
+  if (!this.isSecretAvailable) {
+    return "Unavailable";
+  }
+
+  const now = new Date();
+
+  if (this.secretReleaseDate && this.secretReleaseDate > now) {
+    return `Releases on ${this.secretReleaseDate.toLocaleDateString()}`;
+  }
+
+  return `${this.secretRemainingSlots} slots remaining`;
 });
 
-tourSchema.pre("remove", async function preRemoveMiddleware(next) {
-  try {
-    const Review = mongoose.model("Review");
-
-    await Review.deleteMany({ tour: this._id });
-
-    const Booking = mongoose.model("Booking");
-
-    await Booking.deleteMany({ tour: this._id });
-
-    console.log(`🗑️ Tour "${this.name}" and all related data removed`);
-
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-tourSchema.pre(
-  "findOneAndDelete",
-  async function preFindOneAndDeleteMiddleware(next) {
-    try {
-      const doc = await this.model.findOne(this.getFilter());
-
-      if (doc) {
-        this._doc = doc;
-
-        const Review = mongoose.model("Review");
-
-        await Review.deleteMany({ tour: doc._id });
-
-        const Booking = mongoose.model("Booking");
-
-        await Booking.deleteMany({ tour: doc._id });
-      }
-      next();
-    } catch (error) {
-      next(error);
-    }
+tourSchema.query = {
+  priceRange(min, max) {
+    return this.where("price").gte(min).lte(max);
   },
-);
 
-tourSchema.post(
-  "findOneAndDelete",
-  function postFindOneAndDeleteMiddleware(doc, next) {
-    try {
-      if (doc) {
-        console.log(
-          `🗑️ Tour "${doc.name}" and all related data deleted via findOneAndDelete`,
-        );
-      }
-      next();
-    } catch (error) {
-      next(error);
-    }
+  durationRange(min, max) {
+    return this.where("duration").gte(min).lte(max);
   },
-);
+
+  byDifficulty(difficulty) {
+    return this.where("difficulty").equals(difficulty);
+  },
+
+  minRating(rating) {
+    return this.where("ratingsAverage").gte(rating);
+  },
+
+  available() {
+    const now = new Date();
+
+    return this.where("startDates").elemMatch({
+      $gte: now,
+    });
+  },
+
+  onSale() {
+    return this.where("priceDiscount").gt(0);
+  },
+
+  featured() {
+    return this.where("featured").equals(true);
+  },
+
+  active() {
+    return this.where("isActive").equals(true);
+  },
+
+  byCategory(category) {
+    return this.where("category").equals(category);
+  },
+
+  search(term) {
+    return this.find({
+      $text: {
+        $search: term,
+        $language: "en",
+        $caseSensitive: false,
+        $diacriticSensitive: false,
+      },
+    });
+  },
+
+  sortByPrice(asc = true) {
+    return this.sort({ price: asc ? 1 : -1 });
+  },
+
+  sortByRating() {
+    return this.sort({ ratingsAverage: -1 });
+  },
+
+  sortByPopularity() {
+    return this.sort({ ratingsQuantity: -1 });
+  },
+
+  sortByNewest() {
+    return this.sort({ createdAt: -1 });
+  },
+
+  sortByDuration(asc = true) {
+    return this.sort({ duration: asc ? 1 : -1 });
+  },
+
+  paginate(page = 1, limit = 10) {
+    const skip = (page - 1) * limit;
+
+    return this.skip(skip).limit(limit);
+  },
+
+  selectBasic() {
+    return this.select(
+      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary",
+    );
+  },
+
+  selectDetailed() {
+    return this.select(
+      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize",
+    );
+  },
+
+  withVirtuals() {
+    return this.lean().select("+virtuals");
+  },
+
+  includeSecret() {
+    this._includeSecret = true;
+
+    return this;
+  },
+
+  onlySecret() {
+    return this.where("isSecret").equals(true);
+  },
+
+  bySecretAccessLevel(level) {
+    return this.where("secretAccessLevel").equals(level);
+  },
+
+  bySecretCode(code) {
+    return this.where("secretCode").equals(code);
+  },
+
+  secretAvailable() {
+    const now = new Date();
+
+    return this.where("isSecret")
+      .equals(true)
+      .where("isSecretArchived")
+      .equals(false)
+      .where("secretExpiryDate")
+      .gte(now)
+      .where("secretBookings")
+      .lt(this.where("secretMaxBookings"));
+  },
+
+  byWhitelistedUser(userId) {
+    return this.where("secretWhitelist.userId").equals(userId);
+  },
+
+  secretReleaseDateRange(start, end) {
+    return this.where("secretReleaseDate").gte(start).lte(end);
+  },
+
+  secretExpiryDateRange(start, end) {
+    return this.where("secretExpiryDate").gte(start).lte(end);
+  },
+
+  hasRemainingSlots() {
+    return this.where("secretBookings").lt(this.where("secretMaxBookings"));
+  },
+
+  sortBySecretAvailability() {
+    return this.sort({ secretRemainingSlots: -1 });
+  },
+
+  sortBySecretReleaseDate(asc = true) {
+    return this.sort({ secretReleaseDate: asc ? 1 : -1 });
+  },
+
+  selectSecretFields() {
+    return this.select(
+      "isSecret secretCode secretAccessLevel secretReleaseDate secretExpiryDate secretMaxBookings secretBookings secretWhitelist secretViewCount secretMetadata",
+    );
+  },
+
+  excludeSecret() {
+    return this.where("isSecret").equals(false);
+  },
+};
 
 tourSchema.pre("find", function preFindMiddleware(next) {
   try {
+    if (!this._skipActiveFilter) {
+      this.where("isActive").equals(true);
+    }
+
+    if (!this._includeSecret && !this._skipSecretFilter) {
+      this.where("isSecret").equals(false);
+    }
+
     if (!this._sort) {
       this.sort({ createdAt: -1 });
     }
@@ -384,8 +668,13 @@ tourSchema.pre("find", function preFindMiddleware(next) {
 
 tourSchema.post("find", function postFindMiddleware(docs, next) {
   try {
-    console.log(`🔍 Found ${docs.length} tours`);
+    if (docs && docs.length > 0) {
+      const secretCount = docs.filter((doc) => doc.isSecret).length;
 
+      console.log(
+        `🔍 Found ${docs.length} tours (${secretCount} secret tours)`,
+      );
+    }
     next();
   } catch (error) {
     next(error);
@@ -394,34 +683,12 @@ tourSchema.post("find", function postFindMiddleware(docs, next) {
 
 tourSchema.pre("findOne", function preFindOneMiddleware(next) {
   try {
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
+    if (!this._skipActiveFilter) {
+      this.where("isActive").equals(true);
+    }
 
-tourSchema.post("init", function postInitMiddleware() {
-  try {
-    // This runs when a document is loaded from the database
-    // You can add computed properties or transformations here
-    // console.log(`📄 Tour "${doc.name}" loaded from database`);
-  } catch (error) {
-    // Silent fail for init middleware
-  }
-});
-
-tourSchema.pre("updateOne", function preUpdateOneMiddleware(next) {
-  try {
-    const update = this.getUpdate();
-
-    if (update.$set) {
-      delete update.$set._id;
-
-      if (update.$set.priceDiscount && update.$set.price) {
-        if (update.$set.priceDiscount >= update.$set.price) {
-          throw new Error("Discount price must be below regular price");
-        }
-      }
+    if (!this._includeSecret && !this._skipSecretFilter) {
+      this.where("isSecret").equals(false);
     }
 
     next();
@@ -430,21 +697,74 @@ tourSchema.pre("updateOne", function preUpdateOneMiddleware(next) {
   }
 });
 
-tourSchema.post("updateOne", function postUpdateOneMiddleware(res, next) {
+tourSchema.post("findOne", function postFindOneMiddleware(doc, next) {
   try {
-    console.log(`📝 Tour updated: ${res.modifiedCount} document(s) modified`);
+    if (doc) {
+      const secretStatus = doc.isSecret ? "🔒 SECRET" : "📄";
+
+      console.log(`${secretStatus} Found tour: ${doc.name}`);
+    }
     next();
   } catch (error) {
     next(error);
   }
 });
 
-tourSchema.pre("updateMany", function preUpdateManyMiddleware(next) {
+tourSchema.pre("count", function preCountMiddleware(next) {
   try {
-    const update = this.getUpdate();
+    if (!this._skipActiveFilter) {
+      this.where("isActive").equals(true);
+    }
 
-    if (update.$set && update.$set.price) {
-      // Add additional validation here
+    if (!this._includeSecret && !this._skipSecretFilter) {
+      this.where("isSecret").equals(false);
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("findById", function preFindByIdMiddleware(next) {
+  try {
+    if (!this._skipActiveFilter) {
+      this.where("isActive").equals(true);
+    }
+
+    if (!this._includeSecret && !this._skipSecretFilter) {
+      this.where("isSecret").equals(false);
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.pre("save", function preSaveMiddleware(next) {
+  try {
+    if (this.isSecret && !this.secretCode) {
+      const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      this.secretCode = `SEC-${Date.now().toString(36).toUpperCase()}-${random}`;
+    }
+
+    if (this.isSecret) {
+      if (!this.secretAccessLevel || this.secretAccessLevel === "public") {
+        this.secretAccessLevel = "vip";
+      }
+
+      if (!this.secretMaxBookings || this.secretMaxBookings < 1) {
+        this.secretMaxBookings = 10;
+      }
+
+      if (!this.secretExpiryDate) {
+        const defaultExpiry = new Date();
+
+        defaultExpiry.setMonth(defaultExpiry.getMonth() + 6);
+        this.secretExpiryDate = defaultExpiry;
+      }
     }
 
     next();
@@ -455,11 +775,72 @@ tourSchema.pre("updateMany", function preUpdateManyMiddleware(next) {
 
 tourSchema.pre("aggregate", function preAggregateMiddleware(next) {
   try {
+    const pipeline = this.pipeline();
+
+    const shouldIncludeSecret = this._includeSecret || false;
+
+    const firstStage = pipeline[0];
+    const hasSecretFilter =
+      firstStage &&
+      firstStage.$match &&
+      (firstStage.$match.isSecret !== undefined ||
+        (firstStage.$match.$and &&
+          firstStage.$match.$and.some(
+            (item) => item && item.isSecret !== undefined,
+          )));
+
+    if (!hasSecretFilter && !shouldIncludeSecret) {
+      const hasActiveFilter =
+        firstStage &&
+        firstStage.$match &&
+        (firstStage.$match.isActive !== undefined ||
+          (firstStage.$match.$and &&
+            firstStage.$match.$and.some(
+              (item) => item && item.isActive !== undefined,
+            )));
+
+      if (!hasActiveFilter) {
+        this.pipeline().unshift({
+          $match: { isActive: true, isSecret: false },
+        });
+      } else if (firstStage && firstStage.$match) {
+        firstStage.$match.isSecret = false;
+      }
+    }
+
     next();
   } catch (error) {
     next(error);
   }
 });
+
+tourSchema.post("aggregate", function postAggregateMiddleware(result, next) {
+  try {
+    if (result && result.length > 0) {
+      const secretCount = result.filter((item) => item.isSecret).length;
+
+      console.log(
+        `📊 Aggregation returned ${result.length} documents (${secretCount} secret)`,
+      );
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+tourSchema.index({ isSecret: 1 });
+tourSchema.index({ secretCode: 1 }, { unique: true, sparse: true });
+tourSchema.index({ secretAccessLevel: 1 });
+tourSchema.index({ secretReleaseDate: 1 });
+tourSchema.index({ secretExpiryDate: 1 });
+tourSchema.index({ secretWhitelist: 1 });
+tourSchema.index({ secretBookings: 1, secretMaxBookings: 1 });
+
+tourSchema.index({ isSecret: 1, secretAccessLevel: 1 });
+tourSchema.index({ isSecret: 1, secretReleaseDate: 1, secretExpiryDate: 1 });
+tourSchema.index({ isSecret: 1, secretBookings: 1, secretMaxBookings: 1 });
+tourSchema.index({ secretAccessLevel: 1, secretReleaseDate: 1 });
 
 tourSchema.index({ price: 1, ratingsAverage: -1 });
 tourSchema.index({ slug: 1 });
@@ -468,6 +849,18 @@ tourSchema.index({ difficulty: 1 });
 tourSchema.index({ duration: 1 });
 tourSchema.index({ name: "text", summary: "text", description: "text" });
 
-const Tour = mongoose.model("Tour", tourSchema);
+tourSchema.index({ category: 1 });
+tourSchema.index({ featured: 1, ratingsAverage: -1 });
+tourSchema.index({ isActive: 1, createdAt: -1 });
+tourSchema.index({ "location.coordinates": "2dsphere" });
+tourSchema.index({ maxGroupSize: 1 });
+tourSchema.index({ minimumAge: 1 });
+tourSchema.index({ physicalRating: 1 });
+
+tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
+tourSchema.index({ category: 1, price: 1, duration: 1 });
+tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
+
+const Tour = mongoose.models.Tour || mongoose.model("Tour", tourSchema);
 
 export default Tour;
