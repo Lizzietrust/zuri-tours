@@ -8,15 +8,21 @@ import {
 } from "../controllers/userController.js";
 import {
   checkValidId,
-  checkUserBody,
+  validateUser,
 } from "../middleware/validationMiddleware.js";
+import { protect, authorize } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.param("id", checkValidId);
+router.use(protect);
+router.use(authorize("admin"));
 
-router.route("/").get(getAllUsers).post(checkUserBody, createUser);
+router.route("/").get(getAllUsers).post(validateUser, createUser);
 
-router.route("/:id").get(getUser).patch(updateUser).delete(deleteUser);
+router
+  .route("/:id")
+  .get(checkValidId, getUser)
+  .patch(checkValidId, validateUser, updateUser)
+  .delete(checkValidId, deleteUser);
 
 export default router;
