@@ -15,7 +15,7 @@ export const getAllTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getTour = catchAsync(async (req, res, next) => {
+export const getTour = catchAsync(async (req, res) => {
   const { id } = req.params;
   const isMongoId = id.match(/^[0-9a-fA-F]{24}$/);
 
@@ -24,7 +24,7 @@ export const getTour = catchAsync(async (req, res, next) => {
     : await TourQueryService.getTourBySlug(id);
 
   if (!tour) {
-    return next(new AppError("Tour not found", 404));
+    throw new AppError("Tour not found", 404);
   }
 
   res.status(200).json({
@@ -42,14 +42,14 @@ export const createTour = catchAsync(async (req, res) => {
   });
 });
 
-export const updateTour = catchAsync(async (req, res, next) => {
+export const updateTour = catchAsync(async (req, res) => {
   const tour = await Tour.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
   });
 
   if (!tour) {
-    return next(new AppError("Tour not found", 404));
+    throw new AppError("Tour not found", 404);
   }
 
   res.status(200).json({
@@ -58,11 +58,11 @@ export const updateTour = catchAsync(async (req, res, next) => {
   });
 });
 
-export const deleteTour = catchAsync(async (req, res, next) => {
+export const deleteTour = catchAsync(async (req, res) => {
   const tour = await Tour.findByIdAndDelete(req.params.id);
 
   if (!tour) {
-    return next(new AppError("Tour not found", 404));
+    throw new AppError("Tour not found", 404);
   }
 
   res.status(204).json({
@@ -103,16 +103,14 @@ export const getTopCheapTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getToursByDifficulty = catchAsync(async (req, res, next) => {
+export const getToursByDifficulty = catchAsync(async (req, res) => {
   const { level } = req.params;
   const validLevels = ["easy", "medium", "difficult"];
 
   if (!validLevels.includes(level)) {
-    return next(
-      new AppError(
-        "Invalid difficulty level. Use: easy, medium, or difficult",
-        400,
-      ),
+    throw new AppError(
+      "Invalid difficulty level. Use: easy, medium, or difficult",
+      400,
     );
   }
 
