@@ -1,9 +1,10 @@
 import express from "express";
-import mongoose from "mongoose"; // eslint-disable-line import/no-extraneous-dependencies
+import mongoose from "mongoose";
 import dotenv from "dotenv";
-import cors from "cors"; // eslint-disable-line import/no-extraneous-dependencies
+import cors from "cors";
 import tourRouter from "./routes/tourRoutes.js";
 import userRouter from "./routes/userRoutes.js";
+import authRouter from "./routes/authRoutes.js";
 import connectDB from "./config/db.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
@@ -29,6 +30,7 @@ app.use((req, res, next) => {
 
 app.use("/api/v1/tours", tourRouter);
 app.use("/api/v1/users", userRouter);
+app.use("/api/v1/auth", authRouter);
 
 app.get("/api/health", (req, res) => {
   res.json({
@@ -52,6 +54,7 @@ app.get("/", (req, res) => {
     endpoints: {
       tours: "/api/v1/tours",
       users: "/api/v1/users",
+      auth: "/api/v1/auth",
       health: "/api/health",
     },
   });
