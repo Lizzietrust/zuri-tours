@@ -1,6 +1,29 @@
 import mongoose from "mongoose"; // eslint-disable-line import/no-extraneous-dependencies
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import validator from "validator"; // eslint-disable-line import/no-extraneous-dependencies
+
+function validateNameLength(value) {
+  return validator.isLength(value, { min: 2, max: 50 });
+}
+
+function validateEmail(value) {
+  return validator.isEmail(value);
+}
+
+function validatePasswordStrength(value) {
+  return validator.isStrongPassword(value, {
+    minLength: 6,
+    minLowercase: 0,
+    minUppercase: 0,
+    minNumbers: 0,
+    minSymbols: 0,
+  });
+}
+
+function getEmailErrorMessage(props) {
+  return `${props.value} is not a valid email address!`;
+}
 
 const userSchema = new mongoose.Schema(
   {
@@ -9,6 +32,10 @@ const userSchema = new mongoose.Schema(
       required: [true, "Please add a name"],
       trim: true,
       maxlength: [50, "Name cannot be more than 50 characters"],
+      validate: {
+        validator: validateNameLength,
+        message: "Name must be between 2 and 50 characters",
+      },
     },
     email: {
       type: String,
@@ -16,16 +43,22 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [
-        /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
-        "Please add a valid email",
-      ],
+      validate: {
+        validator: validateEmail,
+        message: getEmailErrorMessage,
+      },
     },
+    photo: String,
     password: {
       type: String,
       required: [true, "Please add a password"],
       minlength: [6, "Password must be at least 6 characters"],
       select: false,
+      validate: {
+        validator: validatePasswordStrength,
+        message:
+          "Password is not strong enough. Use at least 6 characters with a mix of letters, numbers, and symbols.",
+      },
     },
     role: {
       type: String,
@@ -44,7 +77,25 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-userSchema.pre("save", async function preSaveMiddleware(next) {
+userSchema
+  .virtual("passwordConfirm")
+  .get(function getPasswordConfirm() {
+    return this._passwordConfirm;
+  })
+  .set(function setPasswordConfirm(value) {
+    this._passwordConfirm = value;
+  });
+
+userSchema.pre("validate", function validatePasswordConfirm(next) {
+  if (this._passwordConfirm !== undefined) {
+    if (this.password !== this._passwordConfirm) {
+      this.invalidate("passwordConfirm", "Passwords do not match");
+    }
+  }
+  next();
+});
+
+userSchema.pre("save", async function hashPassword(next) {
   if (!this.isModified("password")) {
     return next();
   }
