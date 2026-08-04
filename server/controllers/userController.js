@@ -41,15 +41,12 @@ export const createUser = catchAsync(async (req, res) => {
     role: role || "user",
   });
 
-  const token = user.getSignedJwtToken();
-
   const userWithoutPassword = user.toObject();
 
   delete userWithoutPassword.password;
 
   sendSuccessResponse(res, 201, "User created successfully", {
     user: userWithoutPassword,
-    token,
   });
 });
 
