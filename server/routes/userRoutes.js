@@ -15,9 +15,12 @@ import { protect, authorize } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 router.use(protect);
+
 router.use(authorize("admin"));
 
-router.route("/").get(getAllUsers).post(validateUser, createUser);
+router.route("/").get(getAllUsers);
+
+router.route("/create").post(validateUser, createUser);
 
 router
   .route("/:id")
