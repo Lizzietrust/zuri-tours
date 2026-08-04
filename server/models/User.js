@@ -1,6 +1,6 @@
 import mongoose from "mongoose"; // eslint-disable-line import/no-extraneous-dependencies
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs"; // eslint-disable-line import/no-extraneous-dependencies
+import jwt from "jsonwebtoken"; // eslint-disable-line import/no-extraneous-dependencies
 import validator from "validator"; // eslint-disable-line import/no-extraneous-dependencies
 
 function validateNameLength(value) {
