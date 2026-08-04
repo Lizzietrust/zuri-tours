@@ -173,7 +173,7 @@ export const resetPassword = catchAsync(async (req, res) => {
 
   await user.save();
 
-  const token = user.getSignedautToken();
+  const token = user.getSignedJwtToken();
 
   const userWithoutPassword = user.toObject();
 
