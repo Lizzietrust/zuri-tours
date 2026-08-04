@@ -14,6 +14,11 @@ import {
   getToursByRating,
   searchTours,
 } from "../controllers/tourController.js";
+import { protect, authorize } from "../middleware/authMiddleware.js";
+import {
+  checkValidId,
+  checkTourBody,
+} from "../middleware/validationMiddleware.js";
 
 const router = express.Router();
 
@@ -28,13 +33,15 @@ router.route("/price-range").get(getToursByPriceRange);
 router.route("/difficulty/:level").get(getToursByDifficulty);
 router.route("/search").get(searchTours);
 
-router.route("/").get(getAllTours).post(createTour);
+router.route("/").get(getAllTours);
+router.route("/:id").get(checkValidId, getTour);
+
+router.route("/").post(protect, authorize("admin"), checkTourBody, createTour);
 
 router
   .route("/:id")
-  .get(getTour)
-  .put(updateTour)
-  .patch(updateTour)
-  .delete(deleteTour);
+  .put(protect, authorize("admin"), checkValidId, checkTourBody, updateTour)
+  .patch(protect, authorize("admin"), checkValidId, checkTourBody, updateTour)
+  .delete(protect, authorize("admin"), checkValidId, deleteTour);
 
 export default router;
