@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken"; // eslint-disable-line import/no-extraneous-dependencies
+import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import {
   sendUnauthorizedResponse,
@@ -23,10 +23,39 @@ export const protect = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).select(
+      "+passwordChangedAt +accountDeleted +tokenVersion +lockUntil",
+    );
 
     if (!user) {
-      return sendUnauthorizedResponse(res, "User not found with this token");
+      return sendUnauthorizedResponse(res, "User no longer exists");
+    }
+
+    if (user.accountDeleted) {
+      return sendUnauthorizedResponse(res, "Account has been deleted");
+    }
+
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      const remainingMinutes = Math.ceil((user.lockUntil - new Date()) / 60000);
+
+      return sendUnauthorizedResponse(
+        res,
+        `Account is locked. Please try again in ${remainingMinutes} minutes`,
+      );
+    }
+
+    if (user.changedPasswordAfter(decoded.iat)) {
+      return sendUnauthorizedResponse(
+        res,
+        "Password was recently changed. Please log in again",
+      );
+    }
+
+    if (user.tokenVersion && user.tokenVersion !== decoded.tokenVersion) {
+      return sendUnauthorizedResponse(
+        res,
+        "Session expired. Please log in again",
+      );
     }
 
     req.user = user;
@@ -54,4 +83,28 @@ export const authorize = (...roles) => {
     }
     next();
   };
+};
+
+export const checkLoginAttempts = async (req, res, next) => {
+  const { email } = req.body;
+
+  if (!email) return next();
+
+  const user = await User.findOne({ email }).select(
+    "+lockUntil +loginAttempts",
+  );
+
+  if (!user) return next();
+
+  if (user.lockUntil && user.lockUntil > new Date()) {
+    const remainingMinutes = Math.ceil((user.lockUntil - new Date()) / 60000);
+
+    return sendUnauthorizedResponse(
+      res,
+      `Too many failed attempts. Account locked for ${remainingMinutes} minutes`,
+    );
+  }
+
+  req._loginUser = user;
+  next();
 };
