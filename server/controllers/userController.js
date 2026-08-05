@@ -7,7 +7,13 @@ import {
 } from "../utils/responseHelper.js";
 
 export const getAllUsers = catchAsync(async (req, res) => {
-  const users = await User.find().select("-password");
+  const users = await User.find({ accountDeleted: false })
+    .select(
+      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+    )
+    .select(
+      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
+    );
 
   sendSuccessResponse(res, 200, "Users fetched successfully", users, {
     results: users.length,
@@ -15,7 +21,12 @@ export const getAllUsers = catchAsync(async (req, res) => {
 });
 
 export const getUser = catchAsync(async (req, res) => {
-  const user = await User.findById(req.params.id).select("-password");
+  const user = await User.findOne({
+    _id: req.params.id,
+    accountDeleted: false,
+  }).select(
+    "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+  );
 
   if (!user) {
     return sendNotFoundResponse(res, "User not found");
@@ -64,10 +75,22 @@ export const updateUser = catchAsync(async (req, res) => {
     );
   }
 
-  const user = await User.findByIdAndUpdate(req.params.id, updateData, {
-    new: true,
-    runValidators: true,
-  }).select("-password");
+  delete updateData.accountDeleted;
+  delete updateData.tokenVersion;
+  delete updateData.passwordChangedAt;
+  delete updateData.loginAttempts;
+  delete updateData.lockUntil;
+
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, accountDeleted: false },
+    updateData,
+    {
+      new: true,
+      runValidators: true,
+    },
+  ).select(
+    "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+  );
 
   if (!user) {
     return sendNotFoundResponse(res, "User not found");
@@ -83,7 +106,7 @@ export const deleteUser = catchAsync(async (req, res) => {
     return sendNotFoundResponse(res, "User not found");
   }
 
-  await user.deleteOne();
+  await user.softDelete();
 
   res.status(204).json({
     status: "success",
