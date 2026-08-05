@@ -88,6 +88,11 @@ const tourSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    createdBy: {
+      type: mongoose.Schema.ObjectId,
+      ref: "User",
+      required: [true, "A tour must have a creator"],
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -644,6 +649,16 @@ tourSchema.query = {
   excludeSecret() {
     return this.where("isSecret").equals(false);
   },
+
+  byCreator(userId) {
+    return this.where("createdBy").equals(userId);
+  },
+
+  accessibleBy(userId) {
+    return this.where({
+      $or: [{ createdBy: userId }, { guides: userId }],
+    });
+  },
 };
 
 tourSchema.pre("find", function preFindMiddleware(next) {
@@ -860,6 +875,14 @@ tourSchema.index({ physicalRating: 1 });
 tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
 tourSchema.index({ category: 1, price: 1, duration: 1 });
 tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
+
+tourSchema.index({ createdBy: 1 });
+tourSchema.index({ createdBy: 1, isActive: 1 });
+tourSchema.index({ guides: 1 });
+tourSchema.index({ guides: 1, isActive: 1 });
+
+tourSchema.index({ createdBy: 1, isActive: 1, createdAt: -1 });
+tourSchema.index({ guides: 1, isActive: 1, createdAt: -1 });
 
 const Tour = mongoose.models.Tour || mongoose.model("Tour", tourSchema);
 
