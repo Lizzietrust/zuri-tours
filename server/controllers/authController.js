@@ -29,7 +29,6 @@ export const register = catchAsync(async (req, res) => {
   const userWithoutPassword = user.toObject();
 
   delete userWithoutPassword.password;
-  delete userWithoutPassword.passwordConfirm;
 
   sendSuccessResponse(res, 201, "User registered successfully", {
     user: userWithoutPassword,
@@ -47,19 +46,52 @@ export const login = catchAsync(async (req, res) => {
     );
   }
 
-  const user = await User.findOne({ email }).select("+password");
+  const user = await User.findOne({ email })
+    .select("+password +passwordChangedAt +accountDeleted +tokenVersion")
+    .select("+loginAttempts +lockUntil");
 
   if (!user) {
     return sendUnauthorizedResponse(res, "Invalid email or password");
   }
 
+  if (user.accountDeleted) {
+    return sendUnauthorizedResponse(res, "Account has been deleted");
+  }
+
+  if (user.lockUntil && user.lockUntil > new Date()) {
+    const remainingMinutes = Math.ceil((user.lockUntil - new Date()) / 60000);
+
+    return sendUnauthorizedResponse(
+      res,
+      `Account is locked. Please try again in ${remainingMinutes} minutes`,
+    );
+  }
+
   const isPasswordMatch = await user.matchPassword(password);
 
   if (!isPasswordMatch) {
-    return sendUnauthorizedResponse(res, "Invalid email or password");
+    await user.handleFailedLogin();
+    const remainingAttempts = 5 - user.loginAttempts;
+
+    return sendUnauthorizedResponse(
+      res,
+      `Invalid credentials. ${remainingAttempts} attempts remaining`,
+    );
   }
 
+  await user.resetLoginAttempts();
+
   const token = user.getSignedJwtToken();
+
+  const cookieOptions = {
+    expires: new Date(
+      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000,
+    ),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+  };
+
+  res.cookie("token", token, cookieOptions);
 
   const userWithoutPassword = user.toObject();
 
@@ -72,7 +104,9 @@ export const login = catchAsync(async (req, res) => {
 });
 
 export const getMe = catchAsync(async (req, res) => {
-  const user = await User.findById(req.user.id).select("-password");
+  const user = await User.findById(req.user.id)
+    .select("-password")
+    .select("+lastLogin");
 
   sendSuccessResponse(res, 200, "User profile fetched successfully", user);
 });
@@ -87,7 +121,9 @@ export const updatePassword = catchAsync(async (req, res) => {
     );
   }
 
-  const user = await User.findById(req.user.id).select("+password");
+  const user = await User.findById(req.user.id).select(
+    "+password +passwordChangedAt +tokenVersion",
+  );
 
   const isPasswordMatch = await user.matchPassword(currentPassword);
 
@@ -124,6 +160,10 @@ export const forgotPassword = catchAsync(async (req, res) => {
     return sendValidationErrorResponse(res, "No user found with that email");
   }
 
+  if (user.accountDeleted) {
+    return sendValidationErrorResponse(res, "Account has been deleted");
+  }
+
   const resetToken = crypto.randomBytes(20).toString("hex");
 
   user.resetPasswordToken = crypto
@@ -138,12 +178,6 @@ export const forgotPassword = catchAsync(async (req, res) => {
   const resetUrl = `${req.protocol}://${req.get(
     "host",
   )}/api/v1/auth/resetpassword/${resetToken}`;
-
-  // await sendEmail({
-  //   email: user.email,
-  //   subject: "Password reset token",
-  //   message,
-  // });
 
   sendSuccessResponse(res, 200, "Password reset email sent", {
     resetToken,
@@ -160,10 +194,14 @@ export const resetPassword = catchAsync(async (req, res) => {
   const user = await User.findOne({
     resetPasswordToken,
     resetPasswordExpire: { $gt: Date.now() },
-  });
+  }).select("+passwordChangedAt +tokenVersion");
 
   if (!user) {
     return sendValidationErrorResponse(res, "Invalid or expired token");
+  }
+
+  if (user.accountDeleted) {
+    return sendValidationErrorResponse(res, "Account has been deleted");
   }
 
   user.password = req.body.password;
@@ -192,4 +230,26 @@ export const logout = catchAsync((req, res) => {
   });
 
   sendSuccessResponse(res, 200, "Logged out successfully");
+});
+
+export const invalidateAllSessions = catchAsync(async (req, res) => {
+  const user = await User.findById(req.user.id);
+
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  await user.save({ validateBeforeSave: false });
+
+  sendSuccessResponse(res, 200, "All sessions invalidated successfully");
+});
+
+export const deleteAccount = catchAsync(async (req, res) => {
+  const user = await User.findById(req.user.id);
+
+  await user.softDelete();
+
+  res.cookie("token", "none", {
+    expires: new Date(Date.now() + 10 * 1000),
+    httpOnly: true,
+  });
+
+  sendSuccessResponse(res, 200, "Account deleted successfully");
 });
