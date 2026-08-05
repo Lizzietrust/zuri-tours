@@ -48,7 +48,10 @@ const userSchema = new mongoose.Schema(
         message: getEmailErrorMessage,
       },
     },
-    photo: String,
+    photo: {
+      type: String,
+      default: "default.jpg",
+    },
     password: {
       type: String,
       required: [true, "Please add a password"],
@@ -62,7 +65,10 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["user", "admin"],
+      enum: {
+        values: ["user", "guide", "lead-guide", "admin"],
+        message: "Role must be user, guide, lead-guide, or admin",
+      },
       default: "user",
     },
     resetPasswordToken: String,
@@ -107,6 +113,75 @@ const userSchema = new mongoose.Schema(
       default: [],
       select: false,
     },
+    assignedTours: [
+      {
+        type: mongoose.Schema.ObjectId,
+        ref: "Tour",
+      },
+    ],
+    guideSpecialties: {
+      type: [String],
+      enum: ["adventure", "cultural", "nature", "city", "beach", "mountain"],
+      default: [],
+    },
+    languages: {
+      type: [String],
+      default: [],
+    },
+    bio: {
+      type: String,
+      maxlength: [500, "Bio cannot be more than 500 characters"],
+    },
+    experienceYears: {
+      type: Number,
+      min: 0,
+      max: 50,
+    },
+    certifications: [String],
+    phoneNumber: {
+      type: String,
+    },
+    emergencyContact: {
+      name: String,
+      phone: String,
+      relationship: String,
+    },
+    availability: {
+      monday: { type: Boolean, default: true },
+      tuesday: { type: Boolean, default: true },
+      wednesday: { type: Boolean, default: true },
+      thursday: { type: Boolean, default: true },
+      friday: { type: Boolean, default: true },
+      saturday: { type: Boolean, default: false },
+      sunday: { type: Boolean, default: false },
+    },
+    rating: {
+      type: Number,
+      min: 0,
+      max: 5,
+      default: 0,
+    },
+    totalReviews: {
+      type: Number,
+      default: 0,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    hireDate: {
+      type: Date,
+    },
+    salary: {
+      type: Number,
+      min: 0,
+    },
+    performanceMetrics: {
+      toursLed: { type: Number, default: 0 },
+      customerSatisfaction: { type: Number, default: 0, min: 0, max: 100 },
+      completionRate: { type: Number, default: 0, min: 0, max: 100 },
+      averageRating: { type: Number, default: 0, min: 0, max: 5 },
+    },
   },
   {
     timestamps: true,
@@ -139,7 +214,6 @@ userSchema.pre("save", async function hashPassword(next) {
   const salt = await bcrypt.genSalt(10);
 
   this.password = await bcrypt.hash(this.password, salt);
-
   this.passwordChangedAt = new Date();
   this.tokenVersion = (this.tokenVersion || 0) + 1;
 
@@ -171,7 +245,6 @@ userSchema.methods.isAccountLocked = function isAccountLocked() {
 
 userSchema.methods.handleFailedLogin = async function handleFailedLogin() {
   this.loginAttempts = (this.loginAttempts || 0) + 1;
-
   const MAX_ATTEMPTS = 5;
   const LOCK_TIME = 30 * 60 * 1000;
 
@@ -206,6 +279,7 @@ userSchema.methods.getSignedJwtToken = function getSignedJwtToken() {
   const payload = {
     id: this._id,
     tokenVersion: this.tokenVersion || 0,
+    role: this.role,
   };
 
   return jwt.sign(payload, process.env.JWT_SECRET, {
@@ -217,15 +291,45 @@ userSchema.methods.matchPassword = function matchPassword(enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
 };
 
+userSchema.methods.isGuide = function isGuide() {
+  return this.role === "guide" || this.role === "lead-guide";
+};
+
+userSchema.methods.isLeadGuide = function isLeadGuide() {
+  return this.role === "lead-guide";
+};
+
+userSchema.methods.isAdmin = function isAdmin() {
+  return this.role === "admin";
+};
+
+userSchema.methods.canManageTours = function canManageTours() {
+  return this.role === "lead-guide" || this.role === "admin";
+};
+
+userSchema.methods.canManageGuides = function canManageGuides() {
+  return this.role === "lead-guide" || this.role === "admin";
+};
+
+userSchema.methods.canAssignTours = function canAssignTours() {
+  return this.role === "lead-guide" || this.role === "admin";
+};
+
+userSchema.methods.hasTourAccess = function hasTourAccess(tourId) {
+  if (this.role === "admin" || this.role === "lead-guide") {
+    return true;
+  }
+
+  return this.assignedTours && this.assignedTours.includes(tourId);
+};
+
 userSchema.statics.findAndVerifyUser = async function findAndVerifyUser(id) {
   const user = await this.findById(id)
     .select("+passwordChangedAt +accountDeleted +tokenVersion")
     .select("+loginAttempts +lockUntil");
 
   if (!user) return null;
-
   if (user.accountDeleted) return null;
-
   if (user.lockUntil && user.lockUntil > new Date()) return null;
 
   return user;
@@ -234,6 +338,9 @@ userSchema.statics.findAndVerifyUser = async function findAndVerifyUser(id) {
 userSchema.index({ accountDeleted: 1 });
 userSchema.index({ tokenVersion: 1 });
 userSchema.index({ lockUntil: 1 });
+userSchema.index({ role: 1 });
+userSchema.index({ assignedTours: 1 });
+userSchema.index({ isActive: 1, role: 1 });
 
 const User = mongoose.model("User", userSchema);
 
