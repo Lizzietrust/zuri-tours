@@ -75,6 +75,7 @@ export const updateUser = catchAsync(async (req, res) => {
     );
   }
 
+  delete updateData.role;
   delete updateData.accountDeleted;
   delete updateData.tokenVersion;
   delete updateData.passwordChangedAt;
@@ -112,4 +113,68 @@ export const deleteUser = catchAsync(async (req, res) => {
     status: "success",
     data: null,
   });
+});
+
+export const updateUserRole = catchAsync(async (req, res) => {
+  const { role } = req.body;
+  const { id } = req.params;
+
+  if (!role) {
+    return sendValidationErrorResponse(res, "Please provide a role");
+  }
+
+  const validRoles = ["user", "guide", "lead-guide", "admin"];
+
+  if (!validRoles.includes(role)) {
+    return sendValidationErrorResponse(
+      res,
+      `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+    );
+  }
+
+  const user = await User.findByIdAndUpdate(
+    id,
+    { role },
+    {
+      new: true,
+      runValidators: true,
+    },
+  ).select(
+    "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+  );
+
+  if (!user) {
+    return sendNotFoundResponse(res, "User not found");
+  }
+
+  sendSuccessResponse(res, 200, "User role updated successfully", user);
+});
+
+export const getUsersByRole = catchAsync(async (req, res) => {
+  const { role } = req.params;
+  const validRoles = ["user", "guide", "lead-guide", "admin"];
+
+  if (!validRoles.includes(role)) {
+    return sendValidationErrorResponse(
+      res,
+      `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+    );
+  }
+
+  const users = await User.find({
+    role,
+    accountDeleted: false,
+  }).select(
+    "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+  );
+
+  sendSuccessResponse(
+    res,
+    200,
+    `Users with role '${role}' fetched successfully`,
+    users,
+    {
+      results: users.length,
+    },
+  );
 });
