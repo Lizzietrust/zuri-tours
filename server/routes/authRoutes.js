@@ -15,12 +15,16 @@ import {
   validateAuth,
   validateUser,
 } from "../middleware/validationMiddleware.js";
+import {
+  resetPasswordLimiter,
+  loginLimiter,
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
 router.post("/register", validateUser, register);
-router.post("/login", checkLoginAttempts, validateAuth, login);
-router.post("/forgotpassword", forgotPassword);
+router.post("/login", loginLimiter, checkLoginAttempts, validateAuth, login);
+router.post("/forgotpassword", resetPasswordLimiter, forgotPassword);
 router.put("/resetpassword/:resetToken", resetPassword);
 
 router.use(protect);
