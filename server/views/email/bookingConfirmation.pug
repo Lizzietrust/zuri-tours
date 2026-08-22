@@ -1,0 +1,54 @@
+extends base
+
+block content
+  div.content
+    p Hi #{firstName},
+    
+    p Great news! Your tour booking has been confirmed. Get ready for an amazing adventure! 🎫
+    
+    div.success-box
+      strong ✅ Booking Confirmed!
+      p Your spot is reserved. We can't wait to have you on this incredible journey.
+    
+    div.info-box
+      h3(style='margin-top: 0;') 📋 Booking Details
+      table(style='width: 100%; border-collapse: collapse;')
+        tr
+          td(style='padding: 8px 0;') <strong>Tour:</strong>
+          td(style='padding: 8px 0;') #{tourName}
+        tr
+          td(style='padding: 8px 0;') <strong>Date:</strong>
+          td(style='padding: 8px 0;') #{date}
+        tr
+          td(style='padding: 8px 0;') <strong>Guests:</strong>
+          td(style='padding: 8px 0;') #{guests}
+        tr
+          td(style='padding: 8px 0;') <strong>Total Amount:</strong>
+          td(style='padding: 8px 0;') $#{totalAmount}
+        tr
+          td(style='padding: 8px 0;') <strong>Booking Reference:</strong>
+          td(style='padding: 8px 0;') ##{bookingId}
+    
+    div(style='text-align: center;')
+      a.button(href=url) View Your Booking
+    
+    div.warning-box
+      strong 📌 Important Information:
+      ul(style='padding-left: 20px; margin-bottom: 0;')
+        li Please arrive at least 30 minutes before the tour start time
+        li Bring a valid ID and your booking confirmation
+        li Check the weather forecast and dress appropriately
+        li Contact us immediately if you need to make any changes
+    
+    p What's next?
+    ul(style='padding-left: 20px;')
+      li 📍 We'll send you a reminder 24 hours before the tour
+      li 📱 You can manage your booking through your dashboard
+      li ⭐ After the tour, share your experience with a review
+    
+    p Thank you for choosing Zuri Tours for your adventure. We're committed to making this an unforgettable experience!
+    
+    hr
+    
+    p
+      small This is a confirmation of your booking. Please keep this email for your records.
