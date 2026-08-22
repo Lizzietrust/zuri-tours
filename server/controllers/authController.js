@@ -6,6 +6,7 @@ import {
   sendValidationErrorResponse,
   sendUnauthorizedResponse,
 } from "../utils/responseHelper.js";
+import { Email } from "../utils/email.js";
 
 export const register = catchAsync(async (req, res) => {
   const { name, email, password, passwordConfirm, photo } = req.body;
@@ -23,6 +24,15 @@ export const register = catchAsync(async (req, res) => {
     passwordConfirm,
     photo,
   });
+
+  try {
+    const clientUrl = process.env.CLIENT_URL || "http://localhost:3000";
+
+    await new Email(user, `${clientUrl}/dashboard`).sendWelcome();
+    console.log(`✅ Welcome email sent to ${email}`);
+  } catch (emailError) {
+    console.error("❌ Failed to send welcome email:", emailError.message);
+  }
 
   const token = user.getSignedJwtToken();
 
@@ -157,14 +167,17 @@ export const forgotPassword = catchAsync(async (req, res) => {
   const user = await User.findOne({ email });
 
   if (!user) {
-    return sendValidationErrorResponse(res, "No user found with that email");
+    return sendValidationErrorResponse(
+      res,
+      "No user found with that email address",
+    );
   }
 
   if (user.accountDeleted) {
     return sendValidationErrorResponse(res, "Account has been deleted");
   }
 
-  const resetToken = crypto.randomBytes(20).toString("hex");
+  const resetToken = crypto.randomBytes(32).toString("hex");
 
   user.resetPasswordToken = crypto
     .createHash("sha256")
@@ -175,37 +188,65 @@ export const forgotPassword = catchAsync(async (req, res) => {
 
   await user.save({ validateBeforeSave: false });
 
-  const resetUrl = `${req.protocol}://${req.get(
-    "host",
-  )}/api/v1/auth/resetpassword/${resetToken}`;
+  try {
+    const resetURL = `${req.protocol}://${req.get(
+      "host",
+    )}/api/v1/auth/resetpassword/${resetToken}`;
 
-  sendSuccessResponse(res, 200, "Password reset email sent", {
-    resetToken,
-    resetUrl,
-  });
+    await new Email(user, resetURL).sendPasswordReset();
+
+    sendSuccessResponse(
+      res,
+      200,
+      "Password reset link sent to your email address",
+    );
+  } catch (error) {
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    console.error("Email sending failed:", error);
+
+    return sendValidationErrorResponse(
+      res,
+      "Failed to send password reset email. Please try again later.",
+    );
+  }
 });
 
 export const resetPassword = catchAsync(async (req, res) => {
-  const resetPasswordToken = crypto
+  const hashedToken = crypto
     .createHash("sha256")
     .update(req.params.resetToken)
     .digest("hex");
 
   const user = await User.findOne({
-    resetPasswordToken,
+    resetPasswordToken: hashedToken,
     resetPasswordExpire: { $gt: Date.now() },
-  }).select("+passwordChangedAt +tokenVersion");
+  }).select("+passwordChangedAt +tokenVersion +accountDeleted");
 
   if (!user) {
-    return sendValidationErrorResponse(res, "Invalid or expired token");
+    return sendValidationErrorResponse(
+      res,
+      "Password reset token is invalid or has expired",
+    );
   }
 
   if (user.accountDeleted) {
     return sendValidationErrorResponse(res, "Account has been deleted");
   }
 
-  user.password = req.body.password;
-  user.passwordConfirm = req.body.passwordConfirm;
+  const { password, passwordConfirm } = req.body;
+
+  if (!password || !passwordConfirm) {
+    return sendValidationErrorResponse(
+      res,
+      "Please provide a password and password confirmation",
+    );
+  }
+
+  user.password = password;
+  user.passwordConfirm = passwordConfirm;
   user.resetPasswordToken = undefined;
   user.resetPasswordExpire = undefined;
 
