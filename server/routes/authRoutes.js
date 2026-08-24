@@ -9,6 +9,7 @@ import {
   logout,
   invalidateAllSessions,
   deleteAccount,
+  updateMe,
 } from "../controllers/authController.js";
 import { protect, checkLoginAttempts } from "../middleware/authMiddleware.js";
 import {
@@ -30,6 +31,7 @@ router.put("/resetpassword/:resetToken", resetPassword);
 router.use(protect);
 
 router.get("/me", getMe);
+router.put("/updateme", updateMe);
 router.put("/updatepassword", updatePassword);
 router.get("/logout", logout);
 router.post("/invalidate-sessions", invalidateAllSessions);
