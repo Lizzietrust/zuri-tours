@@ -94,13 +94,9 @@ const userSchema = new mongoose.Schema(
       type: Date,
       select: false,
     },
-    accountDeleted: {
+    active: {
       type: Boolean,
-      default: false,
-      select: false,
-    },
-    accountDeletedAt: {
-      type: Date,
+      default: true,
       select: false,
     },
     tokenVersion: {
@@ -165,10 +161,6 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
     hireDate: {
       type: Date,
     },
@@ -188,25 +180,31 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+function getPasswordConfirm() {
+  return this._passwordConfirm;
+}
+
+function setPasswordConfirm(value) {
+  this._passwordConfirm = value;
+}
+
 userSchema
   .virtual("passwordConfirm")
-  .get(function getPasswordConfirm() {
-    return this._passwordConfirm;
-  })
-  .set(function setPasswordConfirm(value) {
-    this._passwordConfirm = value;
-  });
+  .get(getPasswordConfirm)
+  .set(setPasswordConfirm);
 
-userSchema.pre("validate", function validatePasswordConfirm(next) {
+function validatePasswordConfirmMiddleware(next) {
   if (this._passwordConfirm !== undefined) {
     if (this.password !== this._passwordConfirm) {
       this.invalidate("passwordConfirm", "Passwords do not match");
     }
   }
   next();
-});
+}
 
-userSchema.pre("save", async function hashPassword(next) {
+userSchema.pre("validate", validatePasswordConfirmMiddleware);
+
+async function hashPasswordMiddleware(next) {
   if (!this.isModified("password")) {
     return next();
   }
@@ -217,12 +215,21 @@ userSchema.pre("save", async function hashPassword(next) {
   this.passwordChangedAt = new Date();
   this.tokenVersion = (this.tokenVersion || 0) + 1;
 
-  next();
-});
+  this.active = true;
 
-userSchema.methods.changedPasswordAfter = function changedPasswordAfter(
-  JWTTimestamp,
-) {
+  next();
+}
+
+userSchema.pre("save", hashPasswordMiddleware);
+
+function filterActiveUsersMiddleware(next) {
+  this.find({ active: { $ne: false } });
+  next();
+}
+
+userSchema.pre(/^find/, filterActiveUsersMiddleware);
+
+function changedPasswordAfter(JWTTimestamp) {
   if (this.passwordChangedAt) {
     const changedTimestamp = parseInt(
       this.passwordChangedAt.getTime() / 1000,
@@ -233,17 +240,17 @@ userSchema.methods.changedPasswordAfter = function changedPasswordAfter(
   }
 
   return false;
-};
+}
 
-userSchema.methods.isAccountDeleted = function isAccountDeleted() {
-  return this.accountDeleted === true;
-};
+userSchema.methods.changedPasswordAfter = changedPasswordAfter;
 
-userSchema.methods.isAccountLocked = function isAccountLocked() {
+function isAccountLocked() {
   return this.lockUntil && this.lockUntil > new Date();
-};
+}
 
-userSchema.methods.handleFailedLogin = async function handleFailedLogin() {
+userSchema.methods.isAccountLocked = isAccountLocked;
+
+async function handleFailedLogin() {
   this.loginAttempts = (this.loginAttempts || 0) + 1;
   const MAX_ATTEMPTS = 5;
   const LOCK_TIME = 30 * 60 * 1000;
@@ -253,29 +260,20 @@ userSchema.methods.handleFailedLogin = async function handleFailedLogin() {
   }
 
   await this.save({ validateBeforeSave: false });
-};
+}
 
-userSchema.methods.resetLoginAttempts = async function resetLoginAttempts() {
+userSchema.methods.handleFailedLogin = handleFailedLogin;
+
+async function resetLoginAttempts() {
   this.loginAttempts = 0;
   this.lockUntil = undefined;
   this.lastLogin = new Date();
   await this.save({ validateBeforeSave: false });
-};
+}
 
-userSchema.methods.softDelete = async function softDelete() {
-  this.accountDeleted = true;
-  this.accountDeletedAt = new Date();
-  this.tokenVersion = (this.tokenVersion || 0) + 1;
-  await this.save({ validateBeforeSave: false });
-};
+userSchema.methods.resetLoginAttempts = resetLoginAttempts;
 
-userSchema.methods.reactivate = async function reactivate() {
-  this.accountDeleted = false;
-  this.accountDeletedAt = undefined;
-  await this.save({ validateBeforeSave: false });
-};
-
-userSchema.methods.getSignedJwtToken = function getSignedJwtToken() {
+function getSignedJwtToken() {
   const payload = {
     id: this._id,
     tokenVersion: this.tokenVersion || 0,
@@ -285,62 +283,75 @@ userSchema.methods.getSignedJwtToken = function getSignedJwtToken() {
   return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || "7d",
   });
-};
+}
 
-userSchema.methods.matchPassword = function matchPassword(enteredPassword) {
+userSchema.methods.getSignedJwtToken = getSignedJwtToken;
+
+function matchPassword(enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
-};
+}
 
-userSchema.methods.isGuide = function isGuide() {
+userSchema.methods.matchPassword = matchPassword;
+
+function isGuide() {
   return this.role === "guide" || this.role === "lead-guide";
-};
+}
 
-userSchema.methods.isLeadGuide = function isLeadGuide() {
+function isLeadGuide() {
   return this.role === "lead-guide";
-};
+}
 
-userSchema.methods.isAdmin = function isAdmin() {
+function isAdmin() {
   return this.role === "admin";
-};
+}
 
-userSchema.methods.canManageTours = function canManageTours() {
+function canManageTours() {
   return this.role === "lead-guide" || this.role === "admin";
-};
+}
 
-userSchema.methods.canManageGuides = function canManageGuides() {
+function canManageGuides() {
   return this.role === "lead-guide" || this.role === "admin";
-};
+}
 
-userSchema.methods.canAssignTours = function canAssignTours() {
+function canAssignTours() {
   return this.role === "lead-guide" || this.role === "admin";
-};
+}
 
-userSchema.methods.hasTourAccess = function hasTourAccess(tourId) {
+function hasTourAccess(tourId) {
   if (this.role === "admin" || this.role === "lead-guide") {
     return true;
   }
 
   return this.assignedTours && this.assignedTours.includes(tourId);
-};
+}
 
-userSchema.statics.findAndVerifyUser = async function findAndVerifyUser(id) {
+userSchema.methods.isGuide = isGuide;
+userSchema.methods.isLeadGuide = isLeadGuide;
+userSchema.methods.isAdmin = isAdmin;
+userSchema.methods.canManageTours = canManageTours;
+userSchema.methods.canManageGuides = canManageGuides;
+userSchema.methods.canAssignTours = canAssignTours;
+userSchema.methods.hasTourAccess = hasTourAccess;
+
+async function findAndVerifyUser(id) {
   const user = await this.findById(id)
-    .select("+passwordChangedAt +accountDeleted +tokenVersion")
-    .select("+loginAttempts +lockUntil");
+    .select("+passwordChangedAt +tokenVersion")
+    .select("+loginAttempts +lockUntil +active");
 
   if (!user) return null;
-  if (user.accountDeleted) return null;
+  if (!user.active) return null;
   if (user.lockUntil && user.lockUntil > new Date()) return null;
 
   return user;
-};
+}
 
-userSchema.index({ accountDeleted: 1 });
+userSchema.statics.findAndVerifyUser = findAndVerifyUser;
+
+userSchema.index({ active: 1 });
 userSchema.index({ tokenVersion: 1 });
 userSchema.index({ lockUntil: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ assignedTours: 1 });
-userSchema.index({ isActive: 1, role: 1 });
 
 const User = mongoose.model("User", userSchema);
 
