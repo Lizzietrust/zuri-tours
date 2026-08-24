@@ -3,13 +3,13 @@ import {
   register,
   login,
   getMe,
+  updateMe,
   updatePassword,
   forgotPassword,
   resetPassword,
   logout,
   invalidateAllSessions,
-  deleteAccount,
-  updateMe,
+  deleteMe,
 } from "../controllers/authController.js";
 import { protect, checkLoginAttempts } from "../middleware/authMiddleware.js";
 import {
@@ -32,9 +32,12 @@ router.use(protect);
 
 router.get("/me", getMe);
 router.put("/updateme", updateMe);
+
 router.put("/updatepassword", updatePassword);
+
+router.delete("/deleteMe", deleteMe);
+
 router.get("/logout", logout);
 router.post("/invalidate-sessions", invalidateAllSessions);
-router.delete("/delete-account", deleteAccount);
 
 export default router;
