@@ -294,3 +294,39 @@ export const deleteAccount = catchAsync(async (req, res) => {
 
   sendSuccessResponse(res, 200, "Account deleted successfully");
 });
+
+export const updateMe = catchAsync(async (req, res) => {
+  if (req.body.password || req.body.passwordConfirm) {
+    return sendValidationErrorResponse(
+      res,
+      "This route is not for password updates. Please use /updatepassword",
+    );
+  }
+
+  const allowedFields = ["name", "email", "photo"];
+  const filteredBody = {};
+
+  Object.keys(req.body).forEach((key) => {
+    if (allowedFields.includes(key)) {
+      filteredBody[key] = req.body[key];
+    }
+  });
+
+  if (filteredBody.email) {
+    const existingUser = await User.findOne({
+      email: filteredBody.email,
+      _id: { $ne: req.user.id },
+    });
+
+    if (existingUser) {
+      return sendValidationErrorResponse(res, "Email already in use");
+    }
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
+    new: true,
+    runValidators: true,
+  }).select("-password");
+
+  sendSuccessResponse(res, 200, "Profile updated successfully", updatedUser);
+});
