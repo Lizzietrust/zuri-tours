@@ -23,6 +23,7 @@ export const register = catchAsync(async (req, res) => {
     password,
     passwordConfirm,
     photo,
+    active: true,
   });
 
   try {
@@ -35,7 +36,6 @@ export const register = catchAsync(async (req, res) => {
   }
 
   const token = user.getSignedJwtToken();
-
   const userWithoutPassword = user.toObject();
 
   delete userWithoutPassword.password;
@@ -57,14 +57,14 @@ export const login = catchAsync(async (req, res) => {
   }
 
   const user = await User.findOne({ email })
-    .select("+password +passwordChangedAt +accountDeleted +tokenVersion")
-    .select("+loginAttempts +lockUntil");
+    .select("+password +passwordChangedAt +tokenVersion")
+    .select("+loginAttempts +lockUntil +active");
 
   if (!user) {
     return sendUnauthorizedResponse(res, "Invalid email or password");
   }
 
-  if (user.accountDeleted) {
+  if (!user.active) {
     return sendUnauthorizedResponse(res, "Account has been deleted");
   }
 
@@ -121,6 +121,42 @@ export const getMe = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "User profile fetched successfully", user);
 });
 
+export const updateMe = catchAsync(async (req, res) => {
+  if (req.body.password || req.body.passwordConfirm) {
+    return sendValidationErrorResponse(
+      res,
+      "This route is not for password updates. Please use /updatepassword",
+    );
+  }
+
+  const allowedFields = ["name", "email", "photo"];
+  const filteredBody = {};
+
+  Object.keys(req.body).forEach((key) => {
+    if (allowedFields.includes(key)) {
+      filteredBody[key] = req.body[key];
+    }
+  });
+
+  if (filteredBody.email) {
+    const existingUser = await User.findOne({
+      email: filteredBody.email,
+      _id: { $ne: req.user.id },
+    });
+
+    if (existingUser) {
+      return sendValidationErrorResponse(res, "Email already in use");
+    }
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
+    new: true,
+    runValidators: true,
+  }).select("-password");
+
+  sendSuccessResponse(res, 200, "Profile updated successfully", updatedUser);
+});
+
 export const updatePassword = catchAsync(async (req, res) => {
   const { currentPassword, newPassword, newPasswordConfirm } = req.body;
 
@@ -164,17 +200,13 @@ export const forgotPassword = catchAsync(async (req, res) => {
     return sendValidationErrorResponse(res, "Please provide an email");
   }
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email, active: { $ne: false } });
 
   if (!user) {
     return sendValidationErrorResponse(
       res,
-      "No user found with that email address",
+      "No active account found with that email address",
     );
-  }
-
-  if (user.accountDeleted) {
-    return sendValidationErrorResponse(res, "Account has been deleted");
   }
 
   const resetToken = crypto.randomBytes(32).toString("hex");
@@ -223,7 +255,8 @@ export const resetPassword = catchAsync(async (req, res) => {
   const user = await User.findOne({
     resetPasswordToken: hashedToken,
     resetPasswordExpire: { $gt: Date.now() },
-  }).select("+passwordChangedAt +tokenVersion +accountDeleted");
+    active: { $ne: false },
+  }).select("+passwordChangedAt +tokenVersion +active");
 
   if (!user) {
     return sendValidationErrorResponse(
@@ -232,7 +265,7 @@ export const resetPassword = catchAsync(async (req, res) => {
     );
   }
 
-  if (user.accountDeleted) {
+  if (!user.active) {
     return sendValidationErrorResponse(res, "Account has been deleted");
   }
 
@@ -282,51 +315,11 @@ export const invalidateAllSessions = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "All sessions invalidated successfully");
 });
 
-export const deleteAccount = catchAsync(async (req, res) => {
-  const user = await User.findById(req.user.id);
+export const deleteMe = catchAsync(async (req, res) => {
+  await User.findByIdAndUpdate(req.user.id, { active: false });
 
-  await user.softDelete();
-
-  res.cookie("token", "none", {
-    expires: new Date(Date.now() + 10 * 1000),
-    httpOnly: true,
+  res.status(204).json({
+    status: "success",
+    data: null,
   });
-
-  sendSuccessResponse(res, 200, "Account deleted successfully");
-});
-
-export const updateMe = catchAsync(async (req, res) => {
-  if (req.body.password || req.body.passwordConfirm) {
-    return sendValidationErrorResponse(
-      res,
-      "This route is not for password updates. Please use /updatepassword",
-    );
-  }
-
-  const allowedFields = ["name", "email", "photo"];
-  const filteredBody = {};
-
-  Object.keys(req.body).forEach((key) => {
-    if (allowedFields.includes(key)) {
-      filteredBody[key] = req.body[key];
-    }
-  });
-
-  if (filteredBody.email) {
-    const existingUser = await User.findOne({
-      email: filteredBody.email,
-      _id: { $ne: req.user.id },
-    });
-
-    if (existingUser) {
-      return sendValidationErrorResponse(res, "Email already in use");
-    }
-  }
-
-  const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
-    new: true,
-    runValidators: true,
-  }).select("-password");
-
-  sendSuccessResponse(res, 200, "Profile updated successfully", updatedUser);
 });
