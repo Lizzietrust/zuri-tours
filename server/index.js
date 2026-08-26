@@ -9,6 +9,7 @@ import guideRouter from "./routes/guideRoutes.js";
 import emailRouter from "./routes/emailRoutes.js";
 import connectDB from "./config/db.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
+import { apiLimiter } from "./middleware/rateLimitMiddleware.js";
 
 dotenv.config();
 
@@ -26,6 +27,8 @@ console.log(
 connectDB();
 
 const app = express();
+
+app.use("/api", apiLimiter);
 
 app.use(
   cors({
@@ -97,6 +100,11 @@ app.get("/", (req, res) => {
       email: "/api/v1/email",
       health: "/api/health",
     },
+    rateLimiting: {
+      enabled: true,
+      globalLimit: "100 requests per 15 minutes",
+      description: "Rate limiting is active on all API endpoints",
+    },
     version: "1.0.0",
   });
 });
@@ -113,6 +121,7 @@ const server = app.listen(PORT, () => {
     `📧 Email Service: ${process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap"}`,
   );
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
   console.log(`📚 Available endpoints:`);
   console.log(`   - Auth:    /api/v1/auth`);
   console.log(`   - Users:   /api/v1/users`);
