@@ -17,13 +17,15 @@ import {
   validateUser,
 } from "../middleware/validationMiddleware.js";
 import {
-  resetPasswordLimiter,
+  registerLimiter,
   loginLimiter,
+  resetPasswordLimiter,
+  userUpdateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
-router.post("/register", validateUser, register);
+router.post("/register", registerLimiter, validateUser, register);
 router.post("/login", loginLimiter, checkLoginAttempts, validateAuth, login);
 router.post("/forgotpassword", resetPasswordLimiter, forgotPassword);
 router.put("/resetpassword/:resetToken", resetPassword);
@@ -31,12 +33,9 @@ router.put("/resetpassword/:resetToken", resetPassword);
 router.use(protect);
 
 router.get("/me", getMe);
-router.put("/updateme", updateMe);
-
-router.put("/updatepassword", updatePassword);
-
+router.put("/updateme", userUpdateLimiter, updateMe);
+router.put("/updatepassword", userUpdateLimiter, updatePassword);
 router.delete("/deleteMe", deleteMe);
-
 router.get("/logout", logout);
 router.post("/invalidate-sessions", invalidateAllSessions);
 
