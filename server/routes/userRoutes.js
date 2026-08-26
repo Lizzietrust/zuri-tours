@@ -17,28 +17,38 @@ import {
   authorize,
   hasPermission,
 } from "../middleware/authMiddleware.js";
+import {
+  registerLimiter,
+  userUpdateLimiter,
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
 router.route("/").get(getAllUsers);
-router.route("/create").post(validateUser, createUser);
+
+router.route("/create").post(registerLimiter, validateUser, createUser);
 
 router.use(protect);
 
 router
   .route("/:id")
   .get(checkValidId, getUser)
-  .patch(checkValidId, validateUser, updateUser)
+  .patch(checkValidId, userUpdateLimiter, validateUser, updateUser)
   .delete(checkValidId, deleteUser);
 
 router.use(authorize("admin"));
 
 router
   .route("/:id/role")
-  .patch(checkValidId, hasPermission("manage:roles"), updateUserRole);
+  .patch(
+    checkValidId,
+    hasPermission("manage:roles"),
+    userUpdateLimiter,
+    updateUserRole,
+  );
 
 router
   .route("/by-role/:role")
-  .get(hasPermission("manage:users"), getUsersByRole);
+  .get(hasPermission("manage:users"), userUpdateLimiter, getUsersByRole);
 
 export default router;
