@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
+import helmet from "helmet";
 import tourRouter from "./routes/tourRoutes.js";
 import userRouter from "./routes/userRoutes.js";
 import authRouter from "./routes/authRoutes.js";
@@ -10,6 +11,7 @@ import emailRouter from "./routes/emailRoutes.js";
 import connectDB from "./config/db.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { apiLimiter } from "./middleware/rateLimitMiddleware.js";
+import { securityHeaders } from "./middleware/securityHeaders.js";
 
 dotenv.config();
 
@@ -28,21 +30,70 @@ connectDB();
 
 const app = express();
 
-app.use("/api", apiLimiter);
-
 app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "*",
-    credentials: true,
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        fontSrc: ["'self'", "https:", "data:"],
+        frameSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
   }),
 );
+
+app.use(securityHeaders);
+
+app.use("/api", apiLimiter);
+
+const corsOptions = {
+  origin: process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(",").map((url) => url.trim())
+    : "*",
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+    "Access-Control-Allow-Headers",
+    "Access-Control-Request-Headers",
+    "Access-Control-Request-Method",
+  ],
+  exposedHeaders: ["Content-Range", "X-Content-Range"],
+  maxAge: 86400,
+};
+
+if (process.env.NODE_ENV === "production") {
+  corsOptions.origin = process.env.CLIENT_URL || false;
+}
+
+app.use(cors(corsOptions));
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-app.use((req, res, next) => {
-  console.log(`📝 ${req.method} ${req.url}`);
-  next();
-});
+if (process.env.NODE_ENV !== "production") {
+  app.use((req, res, next) => {
+    console.log(`📝 ${req.method} ${req.url}`);
+    next();
+  });
+}
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/users", userRouter);
@@ -62,6 +113,11 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
     server: "running",
+    security: {
+      helmet: true,
+      cors: process.env.CLIENT_URL ? "configured" : "all origins",
+      rateLimiting: true,
+    },
     database: {
       connected: dbStatus === 1,
       status: dbStatusMap[dbStatus] || "unknown",
@@ -83,6 +139,19 @@ app.get("/api/health", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: `Server is running in ${process.env.NODE_ENV || "development"} mode! 🚀`,
+    security: {
+      helmet: "Active ✅",
+      cors: process.env.CLIENT_URL ? "Restricted" : "All origins (development)",
+      rateLimiting: "Active (100 requests/15min)",
+      headers: [
+        "Content-Security-Policy",
+        "X-Frame-Options",
+        "X-Content-Type-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Strict-Transport-Security",
+      ],
+    },
     database: {
       name: mongoose.connection.name || "Not connected",
       status:
@@ -116,12 +185,13 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`🛡️ Security Headers: Active (Helmet.js)`);
+  console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
   console.log(`📊 Database: ${mongoose.connection.name || "zuri-tours"}`);
   console.log(
     `📧 Email Service: ${process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap"}`,
   );
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
   console.log(`📚 Available endpoints:`);
   console.log(`   - Auth:    /api/v1/auth`);
   console.log(`   - Users:   /api/v1/users`);
