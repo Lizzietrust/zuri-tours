@@ -29,6 +29,10 @@ import {
   checkValidId,
   checkTourBody,
 } from "../middleware/validationMiddleware.js";
+import {
+  tourCreationLimiter,
+  userUpdateLimiter,
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
@@ -44,7 +48,13 @@ router.route("/search").get(searchTours);
 router
   .route("/")
   .get(getAllTours)
-  .post(protect, authorize("admin", "lead-guide"), checkTourBody, createTour);
+  .post(
+    protect,
+    authorize("admin", "lead-guide"),
+    tourCreationLimiter,
+    checkTourBody,
+    createTour,
+  );
 
 router
   .route("/:id")
@@ -53,6 +63,7 @@ router
     protect,
     authorize("admin", "lead-guide"),
     checkValidId,
+    userUpdateLimiter,
     checkTourBody,
     updateTour,
   )
@@ -60,6 +71,7 @@ router
     protect,
     authorize("admin", "lead-guide"),
     checkValidId,
+    userUpdateLimiter,
     checkTourBody,
     updateTour,
   )
@@ -67,7 +79,13 @@ router
 
 router
   .route("/:id/assign-guide")
-  .post(protect, hasPermission("assign:tours"), checkValidId, assignGuide);
+  .post(
+    protect,
+    hasPermission("assign:tours"),
+    checkValidId,
+    userUpdateLimiter,
+    assignGuide,
+  );
 
 router
   .route("/:id/assign-multiple-guides")
@@ -75,12 +93,19 @@ router
     protect,
     hasPermission("assign:tours"),
     checkValidId,
+    userUpdateLimiter,
     assignMultipleGuides,
   );
 
 router
   .route("/:id/remove-guide/:guideId")
-  .delete(protect, hasPermission("manage:guides"), checkValidId, removeGuide);
+  .delete(
+    protect,
+    hasPermission("manage:guides"),
+    checkValidId,
+    userUpdateLimiter,
+    removeGuide,
+  );
 
 router
   .route("/my-assigned-tours")
