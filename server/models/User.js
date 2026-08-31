@@ -25,6 +25,133 @@ function getEmailErrorMessage(props) {
   return `${props.value} is not a valid email address!`;
 }
 
+function sanitizeString(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  let sanitized = value.replace(/<[^>]*>/g, "");
+
+  sanitized = sanitized
+    .split("")
+    .filter(function isPrintableChar(char) {
+      const code = char.charCodeAt(0);
+
+      return (code > 31 && code < 127) || code > 159;
+    })
+    .join("");
+
+  sanitized = sanitized.replace(
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    "",
+  );
+
+  sanitized = sanitized.replace(/ on\w+=/gi, " ");
+
+  sanitized = sanitized.replace(/javascript:/gi, "");
+
+  sanitized = sanitized.replace(/data:/gi, "");
+
+  sanitized = sanitized.trim();
+
+  return sanitized;
+}
+
+function sanitizeObject(obj) {
+  if (!obj || typeof obj !== "object") {
+    return obj;
+  }
+
+  const sanitized = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith("$") || key.includes(".")) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    if (typeof value === "string") {
+      sanitized[key] = sanitizeString(value);
+    } else if (Array.isArray(value)) {
+      // eslint-disable-next-line no-use-before-define
+      sanitized[key] = sanitizeArray(value);
+    } else if (typeof value === "object" && value !== null) {
+      sanitized[key] = sanitizeObject(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizeArray(arr) {
+  if (!Array.isArray(arr)) {
+    return arr;
+  }
+
+  return arr.map(function sanitizeArrayItem(item) {
+    if (typeof item === "string") {
+      return sanitizeString(item);
+    }
+    if (typeof item === "object" && item !== null) {
+      return sanitizeObject(item);
+    }
+
+    return item;
+  });
+}
+
+function sanitizeDocument(doc) {
+  if (doc.name) {
+    doc.name = sanitizeString(doc.name);
+  }
+
+  if (doc.bio) {
+    doc.bio = sanitizeString(doc.bio);
+  }
+
+  if (doc.phoneNumber) {
+    doc.phoneNumber = sanitizeString(doc.phoneNumber).replace(/[^\d+]/g, "");
+  }
+
+  if (doc.languages && Array.isArray(doc.languages)) {
+    doc.languages = doc.languages.map(function sanitizeLanguage(lang) {
+      return sanitizeString(lang);
+    });
+  }
+
+  if (doc.certifications && Array.isArray(doc.certifications)) {
+    doc.certifications = doc.certifications.map(function sanitizeCert(cert) {
+      return sanitizeString(cert);
+    });
+  }
+
+  if (doc.guideSpecialties && Array.isArray(doc.guideSpecialties)) {
+    doc.guideSpecialties = doc.guideSpecialties.map(
+      function sanitizeSpecialty(specialty) {
+        return sanitizeString(specialty);
+      },
+    );
+  }
+
+  if (doc.emergencyContact) {
+    if (doc.emergencyContact.name) {
+      doc.emergencyContact.name = sanitizeString(doc.emergencyContact.name);
+    }
+    if (doc.emergencyContact.phone) {
+      doc.emergencyContact.phone = sanitizeString(
+        doc.emergencyContact.phone,
+      ).replace(/[^\d+]/g, "");
+    }
+    if (doc.emergencyContact.relationship) {
+      doc.emergencyContact.relationship = sanitizeString(
+        doc.emergencyContact.relationship,
+      );
+    }
+  }
+}
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -179,6 +306,11 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+userSchema.pre("validate", function sanitizeBeforeValidate(next) {
+  sanitizeDocument(this);
+  next();
+});
 
 function getPasswordConfirm() {
   return this._passwordConfirm;
@@ -338,9 +470,15 @@ async function findAndVerifyUser(id) {
     .select("+passwordChangedAt +tokenVersion")
     .select("+loginAttempts +lockUntil +active");
 
-  if (!user) return null;
-  if (!user.active) return null;
-  if (user.lockUntil && user.lockUntil > new Date()) return null;
+  if (!user) {
+    return null;
+  }
+  if (!user.active) {
+    return null;
+  }
+  if (user.lockUntil && user.lockUntil > new Date()) {
+    return null;
+  }
 
   return user;
 }
