@@ -5,6 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import mongoSanitize from "express-mongo-sanitize"; // eslint-disable-line import/no-extraneous-dependencies
 import xss from "xss-clean"; // eslint-disable-line import/no-extraneous-dependencies
+import hpp from "hpp"; // eslint-disable-line import/no-extraneous-dependencies
 import tourRouter from "./routes/tourRoutes.js";
 import userRouter from "./routes/userRoutes.js";
 import authRouter from "./routes/authRoutes.js";
@@ -91,6 +92,20 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(xss());
 app.use(mongoSanitize());
 
+app.use(
+  hpp({
+    whitelist: [
+      "sort",
+      "limit",
+      "page",
+      "fields",
+      "price",
+      "rating",
+      "duration",
+    ],
+  }),
+);
+
 app.use("/api", apiLimiter);
 
 if (process.env.NODE_ENV !== "production") {
@@ -126,6 +141,7 @@ app.get("/api/health", (req, res) => {
         xss: true,
         mongoSanitize: true,
       },
+      parameterPollutionProtection: true,
     },
     database: {
       connected: dbStatus === 1,
@@ -156,6 +172,7 @@ app.get("/", (req, res) => {
         xssProtection: "Active ✅",
         noSqlInjectionProtection: "Active ✅",
       },
+      parameterPollutionProtection: "Active ✅",
       headers: [
         "Content-Security-Policy",
         "X-Frame-Options",
@@ -202,6 +219,7 @@ const server = app.listen(PORT, () => {
   console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
   console.log(`🛡️ XSS Protection: Active (xss-clean)`);
   console.log(`🛡️ NoSQL Injection Protection: Active (mongo-sanitize)`);
+  console.log(`🛡️ Parameter Pollution Protection: Active (hpp)`);
   console.log(`📊 Database: ${mongoose.connection.name || "zuri-tours"}`);
   console.log(
     `📧 Email Service: ${process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap"}`,
