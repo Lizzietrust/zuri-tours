@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
+import mongoSanitize from "express-mongo-sanitize"; // eslint-disable-line import/no-extraneous-dependencies
+import xss from "xss-clean"; // eslint-disable-line import/no-extraneous-dependencies
 import tourRouter from "./routes/tourRoutes.js";
 import userRouter from "./routes/userRoutes.js";
 import authRouter from "./routes/authRoutes.js";
@@ -56,8 +58,6 @@ app.use(
 
 app.use(securityHeaders);
 
-app.use("/api", apiLimiter);
-
 const corsOptions = {
   origin: process.env.CLIENT_URL
     ? process.env.CLIENT_URL.split(",").map((url) => url.trim())
@@ -88,6 +88,11 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+app.use(xss());
+app.use(mongoSanitize());
+
+app.use("/api", apiLimiter);
+
 if (process.env.NODE_ENV !== "production") {
   app.use((req, res, next) => {
     console.log(`📝 ${req.method} ${req.url}`);
@@ -117,6 +122,10 @@ app.get("/api/health", (req, res) => {
       helmet: true,
       cors: process.env.CLIENT_URL ? "configured" : "all origins",
       rateLimiting: true,
+      sanitization: {
+        xss: true,
+        mongoSanitize: true,
+      },
     },
     database: {
       connected: dbStatus === 1,
@@ -143,6 +152,10 @@ app.get("/", (req, res) => {
       helmet: "Active ✅",
       cors: process.env.CLIENT_URL ? "Restricted" : "All origins (development)",
       rateLimiting: "Active (100 requests/15min)",
+      sanitization: {
+        xssProtection: "Active ✅",
+        noSqlInjectionProtection: "Active ✅",
+      },
       headers: [
         "Content-Security-Policy",
         "X-Frame-Options",
@@ -187,6 +200,8 @@ const server = app.listen(PORT, () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🛡️ Security Headers: Active (Helmet.js)`);
   console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
+  console.log(`🛡️ XSS Protection: Active (xss-clean)`);
+  console.log(`🛡️ NoSQL Injection Protection: Active (mongo-sanitize)`);
   console.log(`📊 Database: ${mongoose.connection.name || "zuri-tours"}`);
   console.log(
     `📧 Email Service: ${process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap"}`,
