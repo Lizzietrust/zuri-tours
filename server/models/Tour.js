@@ -106,18 +106,117 @@ const tourSchema = new mongoose.Schema(
       enum: ["adventure", "cultural", "nature", "city", "beach", "mountain"],
       default: "adventure",
     },
+
     location: {
       type: {
         type: String,
         enum: ["Point"],
         default: "Point",
+        required: true,
       },
       coordinates: {
         type: [Number],
-        default: [0, 0],
+        required: [true, "Please add coordinates"],
+        validate: {
+          validator: function validateCoordinates(val) {
+            if (!val || val.length !== 2) return false;
+
+            const [lng, lat] = val;
+
+            return lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+          },
+          message: "Invalid coordinates. Must be [longitude, latitude]",
+        },
       },
-      address: String,
-      description: String,
+      address: {
+        type: String,
+        trim: true,
+        required: [true, "Please add an address"],
+      },
+      description: {
+        type: String,
+        trim: true,
+      },
+
+      city: {
+        type: String,
+        trim: true,
+      },
+      country: {
+        type: String,
+        trim: true,
+      },
+      region: {
+        type: String,
+        trim: true,
+      },
+      postalCode: {
+        type: String,
+        trim: true,
+      },
+      placeId: {
+        type: String,
+        trim: true,
+      },
+      formattedAddress: {
+        type: String,
+        trim: true,
+      },
+    },
+
+    locations: [
+      {
+        type: {
+          type: String,
+          enum: ["Point"],
+          default: "Point",
+        },
+        coordinates: {
+          type: [Number],
+          required: true,
+          validate: {
+            validator: function validateCoordinates(val) {
+              if (!val || val.length !== 2) return false;
+              const [lng, lat] = val;
+
+              return lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+            },
+            message: "Invalid coordinates. Must be [longitude, latitude]",
+          },
+        },
+        address: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        description: String,
+        city: String,
+        country: String,
+        region: String,
+        order: {
+          type: Number,
+          default: 0,
+        },
+        duration: {
+          type: Number,
+          default: 1,
+        },
+        activities: [String],
+        accommodation: String,
+      },
+    ],
+
+    geoFence: {
+      radius: {
+        type: Number,
+        default: 5000,
+        min: 0,
+      },
+      unit: {
+        type: String,
+        enum: ["meters", "kilometers", "miles"],
+        default: "meters",
+      },
     },
     included: [String],
     excluded: [String],
@@ -165,7 +264,6 @@ const tourSchema = new mongoose.Schema(
       max: 5,
       default: 3,
     },
-
     isSecret: {
       type: Boolean,
       default: false,
@@ -230,266 +328,168 @@ const tourSchema = new mongoose.Schema(
   },
 );
 
-tourSchema.virtual("durationHours").get(function getDurationHours() {
-  return this.duration * 24;
+tourSchema.virtual("location.coordinates").get(function getCoordinates() {
+  return this.location && this.location.coordinates
+    ? this.location.coordinates
+    : null;
 });
 
-tourSchema.virtual("durationWeeks").get(function getDurationWeeks() {
-  return Math.round((this.duration / 7) * 10) / 10;
-});
+tourSchema.virtual("geoJSON").get(function getGeoJSON() {
+  if (!this.location || !this.location.coordinates) return null;
 
-tourSchema.virtual("durationFormatted").get(function getDurationFormatted() {
-  if (this.duration < 7) {
-    return `${this.duration} day${this.duration > 1 ? "s" : ""}`;
-  }
-  const weeks = Math.round((this.duration / 7) * 10) / 10;
-
-  return `${weeks} week${weeks > 1 ? "s" : ""}`;
-});
-
-tourSchema.virtual("durationBreakdown").get(function getDurationBreakdown() {
-  const weeks = Math.floor(this.duration / 7);
-  const days = this.duration % 7;
-
-  if (weeks === 0) {
-    return `${days} day${days > 1 ? "s" : ""}`;
-  }
-  if (days === 0) {
-    return `${weeks} week${weeks > 1 ? "s" : ""}`;
-  }
-
-  return `${weeks} week${weeks > 1 ? "s" : ""} and ${days} day${days > 1 ? "s" : ""}`;
-});
-
-tourSchema.virtual("pricePerDay").get(function getPricePerDay() {
-  return Math.round(this.price / this.duration);
-});
-
-tourSchema.virtual("discountPercentage").get(function getDiscountPercentage() {
-  if (!this.priceDiscount || this.priceDiscount === 0) {
-    return 0;
-  }
-
-  return Math.round(((this.price - this.priceDiscount) / this.price) * 100);
-});
-
-tourSchema.virtual("finalPrice").get(function getFinalPrice() {
-  return this.priceDiscount || this.price;
-});
-
-tourSchema.virtual("isOnSale").get(function getIsOnSale() {
-  return !!(this.priceDiscount && this.priceDiscount > 0);
-});
-
-tourSchema.virtual("ratingStatus").get(function getRatingStatus() {
-  const rating = this.ratingsAverage;
-
-  if (rating >= 4.7) {
-    return "Excellent ⭐⭐⭐⭐⭐";
-  }
-  if (rating >= 4.3) {
-    return "Very Good ⭐⭐⭐⭐";
-  }
-  if (rating >= 3.8) {
-    return "Good ⭐⭐⭐";
-  }
-  if (rating >= 3.0) {
-    return "Average ⭐⭐";
-  }
-
-  return "Below Average ⭐";
-});
-
-tourSchema.virtual("reviewCount").get(function getReviewCount() {
-  return this.reviews ? this.reviews.length : 0;
-});
-
-tourSchema.virtual("computedRating").get(function getComputedRating() {
-  if (!this.reviews || this.reviews.length === 0) {
-    return 0;
-  }
-  const total = this.reviews.reduce((sum, review) => sum + review.rating, 0);
-
-  return Math.round((total / this.reviews.length) * 10) / 10;
-});
-
-tourSchema.virtual("reviews", {
-  ref: "Review",
-  foreignField: "tour",
-  localField: "_id",
-});
-
-tourSchema.virtual("upcomingStartDates").get(function getUpcomingStartDates() {
-  if (!this.startDates || this.startDates.length === 0) {
-    return [];
-  }
-  const now = new Date();
-
-  return this.startDates.filter((date) => date >= now).sort((a, b) => a - b);
-});
-
-tourSchema.virtual("pastStartDates").get(function getPastStartDates() {
-  if (!this.startDates || this.startDates.length === 0) {
-    return [];
-  }
-  const now = new Date();
-
-  return this.startDates.filter((date) => date < now).sort((a, b) => b - a);
-});
-
-tourSchema.virtual("nextStartDate").get(function getNextStartDate() {
-  const upcoming = this.upcomingStartDates;
-
-  return upcoming.length > 0 ? upcoming[0] : null;
-});
-
-tourSchema.virtual("isFullyBooked").get(function getIsFullyBooked() {
-  return false;
-});
-
-tourSchema.virtual("availabilityStatus").get(function getAvailabilityStatus() {
-  if (!this.startDates || this.startDates.length === 0) {
-    return "No dates available";
-  }
-  const upcoming = this.upcomingStartDates;
-
-  if (upcoming.length === 0) {
-    return "No upcoming dates";
-  }
-  if (upcoming.length <= 2) {
-    return "Limited availability";
-  }
-
-  return "Available";
-});
-
-tourSchema.virtual("difficultyLevel").get(function getDifficultyLevel() {
-  const levels = {
-    easy: "🟢 Easy",
-    medium: "🟡 Medium",
-    difficult: "🔴 Difficult",
-  };
-
-  return levels[this.difficulty] || this.difficulty;
-});
-
-tourSchema.virtual("displayPrice").get(function getDisplayPrice() {
-  const { finalPrice } = this;
-  const formatted = `$${finalPrice.toLocaleString()}`;
-
-  if (this.isOnSale) {
-    const original = `$${this.price.toLocaleString()}`;
-
-    return `${formatted} (was ${original})`;
-  }
-
-  return formatted;
-});
-
-tourSchema.virtual("durationInUnits").get(function getDurationInUnits() {
   return {
-    days: this.duration,
-    hours: this.duration * 24,
-    minutes: this.duration * 24 * 60,
-    seconds: this.duration * 24 * 60 * 60,
-    weeks: Math.round((this.duration / 7) * 100) / 100,
-    months: Math.round((this.duration / 30) * 100) / 100,
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: this.location.coordinates,
+    },
+    properties: {
+      name: this.name,
+      address: this.location.address,
+      city: this.location.city,
+      country: this.location.country,
+    },
   };
 });
 
-tourSchema.virtual("itineraryDays").get(function getItineraryDays() {
-  return this.itinerary ? this.itinerary.length : 0;
-});
-
-tourSchema.virtual("includedItems").get(function getIncludedItems() {
-  return this.included || [];
-});
-
-tourSchema.virtual("excludedItems").get(function getExcludedItems() {
-  return this.excluded || [];
-});
-
-tourSchema.virtual("isSecretAvailable").get(function getIsSecretAvailable() {
-  if (!this.isSecret) {
-    return false;
-  }
-  if (this.isSecretArchived) {
-    return false;
+tourSchema.virtual("centerPoint").get(function getCenterPoint() {
+  if (!this.locations || this.locations.length === 0) {
+    return this.location ? this.location.coordinates : null;
   }
 
-  const now = new Date();
+  const coords = this.locations.map((loc) => loc.coordinates);
 
-  if (this.secretExpiryDate && this.secretExpiryDate < now) {
-    return false;
-  }
-  if (this.secretReleaseDate && this.secretReleaseDate > now) {
-    return false;
-  }
+  const latSum = coords.reduce((sum, coord) => sum + coord[1], 0);
+  const lngSum = coords.reduce((sum, coord) => sum + coord[0], 0);
 
-  return this.secretBookings < this.secretMaxBookings;
+  return [lngSum / coords.length, latSum / coords.length];
 });
 
-tourSchema
-  .virtual("secretRemainingSlots")
-  .get(function getSecretRemainingSlots() {
-    if (!this.isSecret) {
-      return 0;
+tourSchema.virtual("locationCount").get(function getLocationCount() {
+  if (this.locations) {
+    return this.locations.length;
+  }
+
+  return this.location ? 1 : 0;
+});
+
+tourSchema.virtual("locationSummary").get(function getLocationSummary() {
+  const parts = [];
+
+  if (this.location) {
+    if (this.location.city) parts.push(this.location.city);
+    if (this.location.country) parts.push(this.location.country);
+    if (this.location.address) parts.push(this.location.address);
+
+    if (parts.length > 0) return parts.join(", ");
+  }
+
+  if (this.locations && this.locations.length > 0) {
+    const uniqueCities = [
+      ...new Set(this.locations.map((l) => l.city).filter(Boolean)),
+    ];
+    const uniqueCountries = [
+      ...new Set(this.locations.map((l) => l.country).filter(Boolean)),
+    ];
+
+    if (uniqueCities.length > 0) {
+      if (uniqueCities.length > 3) {
+        return `${uniqueCities.slice(0, 3).join(", ")} + ${uniqueCities.length - 3} more cities`;
+      }
+
+      return uniqueCities.join(", ");
     }
 
-    return Math.max(0, this.secretMaxBookings - this.secretBookings);
-  });
+    if (uniqueCountries.length > 0) {
+      if (uniqueCountries.length > 2) {
+        return `${uniqueCountries.slice(0, 2).join(", ")} + ${uniqueCountries.length - 2} more countries`;
+      }
 
-tourSchema
-  .virtual("secretAvailabilityPercentage")
-  .get(function getSecretAvailabilityPercentage() {
-    if (!this.isSecret || this.secretMaxBookings === 0) {
-      return 0;
+      return uniqueCountries.join(", ");
+    }
+  }
+
+  return "Location not specified";
+});
+
+tourSchema.virtual("hasLocation").get(function hasLocation() {
+  return !!(
+    this.location &&
+    this.location.coordinates &&
+    this.location.coordinates.length === 2
+  );
+});
+
+tourSchema.virtual("hasMultipleLocations").get(function hasMultipleLocations() {
+  return !!(this.locations && this.locations.length > 1);
+});
+
+tourSchema.methods.getNearestLocation = function getNearestLocation(point) {
+  if (!this.locations || this.locations.length === 0) {
+    return this.location;
+  }
+
+  const [targetLng, targetLat] = point;
+  let nearest = null;
+  let minDistance = Infinity;
+
+  for (const location of this.locations) {
+    const [lng, lat] = location.coordinates;
+    const distance = Math.sqrt((lng - targetLng) ** 2 + (lat - targetLat) ** 2);
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearest = location;
+    }
+  }
+
+  return nearest;
+};
+
+tourSchema.methods.getSortedLocationsByDistance =
+  function getSortedLocationsByDistance(point) {
+    if (!this.locations || this.locations.length === 0) {
+      return [];
     }
 
-    return Math.round(
-      (this.secretRemainingSlots / this.secretMaxBookings) * 100,
-    );
-  });
+    const [targetLng, targetLat] = point;
 
-tourSchema.virtual("isSecretExpired").get(function getIsSecretExpired() {
-  if (!this.isSecret) {
-    return false;
-  }
-  if (this.isSecretArchived) {
-    return true;
-  }
+    return [...this.locations].sort((a, b) => {
+      const [aLng, aLat] = a.coordinates;
+      const [bLng, bLat] = b.coordinates;
+      const distA = Math.sqrt(
+        (aLng - targetLng) ** 2 + (aLat - targetLat) ** 2,
+      );
+      const distB = Math.sqrt(
+        (bLng - targetLng) ** 2 + (bLat - targetLat) ** 2,
+      );
 
-  const now = new Date();
+      return distA - distB;
+    });
+  };
 
-  if (this.secretExpiryDate && this.secretExpiryDate < now) {
-    return true;
-  }
+tourSchema.methods.calculateDistance = function calculateDistance(
+  coord1,
+  coord2,
+) {
+  const [lng1, lat1] = coord1;
+  const [lng2, lat2] = coord2;
 
-  return this.secretBookings >= this.secretMaxBookings;
-});
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
 
-tourSchema.virtual("secretStatus").get(function getSecretStatus() {
-  if (!this.isSecret) {
-    return "Not a secret tour";
-  }
-  if (this.isSecretArchived) {
-    return "Archived";
-  }
-  if (this.isSecretExpired) {
-    return "Expired";
-  }
-  if (!this.isSecretAvailable) {
-    return "Unavailable";
-  }
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
 
-  const now = new Date();
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  if (this.secretReleaseDate && this.secretReleaseDate > now) {
-    return `Releases on ${this.secretReleaseDate.toLocaleDateString()}`;
-  }
-
-  return `${this.secretRemainingSlots} slots remaining`;
-});
+  return R * c;
+};
 
 tourSchema.query = {
   priceRange(min, max) {
@@ -571,13 +571,13 @@ tourSchema.query = {
 
   selectBasic() {
     return this.select(
-      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary",
+      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary location",
     );
   },
 
   selectDetailed() {
     return this.select(
-      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize",
+      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize location locations",
     );
   },
 
@@ -585,6 +585,82 @@ tourSchema.query = {
     return this.lean().select("+virtuals");
   },
 
+  near(point, maxDistance = 5000, minDistance = 0) {
+    const [lng, lat] = point;
+
+    if (!point || !Array.isArray(point) || point.length !== 2) {
+      throw new Error("Invalid coordinates. Must be [longitude, latitude]");
+    }
+
+    if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+      throw new Error(
+        "Invalid coordinates. Longitude must be -180 to 180, latitude -90 to 90",
+      );
+    }
+
+    return this.where("location.coordinates").near({
+      center: [lng, lat],
+      maxDistance,
+      minDistance,
+      spherical: true,
+    });
+  },
+
+  withinBox(southWest, northEast) {
+    return this.where("location.coordinates").within({
+      box: [southWest, northEast],
+    });
+  },
+
+  withinPolygon(polygon) {
+    return this.where("location.coordinates").within({
+      polygon,
+    });
+  },
+
+  byCity(city) {
+    return this.where("location.city").equals(city);
+  },
+
+  byCountry(country) {
+    return this.where("location.country").equals(country);
+  },
+
+  byRegion(region) {
+    return this.where("location.region").equals(region);
+  },
+
+  hasMultipleLocations() {
+    return this.where("locations.0").exists(true);
+  },
+
+  // Find tours with specific location count
+  locationCount(min = 1, max = null) {
+    let query = this.where("locations").size(min);
+
+    if (max !== null) {
+      query = query.where("locations").size(max);
+    }
+
+    return query;
+  },
+
+  // Find tours by location activity
+  byLocationActivity(activity) {
+    return this.where("locations.activities").in([activity]);
+  },
+
+  // Find tours by accommodation type at locations
+  byLocationAccommodation(accommodation) {
+    return this.where("locations.accommodation").equals(accommodation);
+  },
+
+  // Find tours with geo-fence
+  withGeoFence() {
+    return this.where("geoFence.radius").gt(0);
+  },
+
+  // Enhanced secret methods
   includeSecret() {
     this._includeSecret = true;
 
@@ -659,7 +735,49 @@ tourSchema.query = {
       $or: [{ createdBy: userId }, { guides: userId }],
     });
   },
+
+  // Enhanced location sorting
+  sortByDistance(point) {
+    const [lng, lat] = point;
+
+    return this.aggregate([
+      {
+        $addFields: {
+          distance: {
+            $function: {
+              body(coords, targetLng, targetLat) {
+                if (!coords || coords.length !== 2) return null;
+                const [lng, lat] = coords;
+                const R = 6371000;
+                const dLat = ((lat - targetLat) * Math.PI) / 180;
+                const dLng = ((lng - targetLng) * Math.PI) / 180;
+                const a =
+                  Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos((targetLat * Math.PI) / 180) *
+                    Math.cos((lat * Math.PI) / 180) *
+                    Math.sin(dLng / 2) *
+                    Math.sin(dLng / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+                return R * c;
+              },
+              args: ["$location.coordinates", lng, lat],
+              lang: "js",
+            },
+          },
+        },
+      },
+      { $sort: { distance: 1 } },
+    ]);
+  },
+
+  // Sort by number of locations
+  sortByLocationCount(asc = false) {
+    return this.sort({ locationCount: asc ? 1 : -1 });
+  },
 };
+
+// ==================== MIDDLEWARE ====================
 
 tourSchema.pre("find", function preFindMiddleware(next) {
   try {
@@ -685,9 +803,10 @@ tourSchema.post("find", function postFindMiddleware(docs, next) {
   try {
     if (docs && docs.length > 0) {
       const secretCount = docs.filter((doc) => doc.isSecret).length;
+      const locationCount = docs.filter((doc) => doc.hasLocation).length;
 
       console.log(
-        `🔍 Found ${docs.length} tours (${secretCount} secret tours)`,
+        `🔍 Found ${docs.length} tours (${secretCount} secret tours, ${locationCount} with location)`,
       );
     }
     next();
@@ -716,8 +835,9 @@ tourSchema.post("findOne", function postFindOneMiddleware(doc, next) {
   try {
     if (doc) {
       const secretStatus = doc.isSecret ? "🔒 SECRET" : "📄";
+      const locationStatus = doc.hasLocation ? "📍" : "📍❌";
 
-      console.log(`${secretStatus} Found tour: ${doc.name}`);
+      console.log(`${secretStatus} ${locationStatus} Found tour: ${doc.name}`);
     }
     next();
   } catch (error) {
@@ -759,12 +879,14 @@ tourSchema.pre("findById", function preFindByIdMiddleware(next) {
 
 tourSchema.pre("save", function preSaveMiddleware(next) {
   try {
+    // Generate secret code if needed
     if (this.isSecret && !this.secretCode) {
       const random = Math.random().toString(36).substring(2, 8).toUpperCase();
 
       this.secretCode = `SEC-${Date.now().toString(36).toUpperCase()}-${random}`;
     }
 
+    // Set secret defaults
     if (this.isSecret) {
       if (!this.secretAccessLevel || this.secretAccessLevel === "public") {
         this.secretAccessLevel = "vip";
@@ -782,6 +904,28 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
       }
     }
 
+    // Validate geospatial data
+    if (this.location && this.location.coordinates) {
+      const [lng, lat] = this.location.coordinates;
+
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        throw new Error(
+          "Invalid coordinates. Longitude must be -180 to 180, latitude -90 to 90",
+        );
+      }
+    }
+
+    // Validate multiple locations
+    if (this.locations && this.locations.length > 0) {
+      for (const loc of this.locations) {
+        const [lng, lat] = loc.coordinates;
+
+        if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+          throw new Error(`Invalid coordinates for location: ${loc.address}`);
+        }
+      }
+    }
+
     next();
   } catch (error) {
     next(error);
@@ -791,7 +935,6 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
 tourSchema.pre("aggregate", function preAggregateMiddleware(next) {
   try {
     const pipeline = this.pipeline();
-
     const shouldIncludeSecret = this._includeSecret || false;
 
     const firstStage = pipeline[0];
@@ -844,6 +987,9 @@ tourSchema.post("aggregate", function postAggregateMiddleware(result, next) {
   }
 });
 
+// ==================== INDEXES ====================
+
+// Secret indexes
 tourSchema.index({ isSecret: 1 });
 tourSchema.index({ secretCode: 1 }, { unique: true, sparse: true });
 tourSchema.index({ secretAccessLevel: 1 });
@@ -857,6 +1003,7 @@ tourSchema.index({ isSecret: 1, secretReleaseDate: 1, secretExpiryDate: 1 });
 tourSchema.index({ isSecret: 1, secretBookings: 1, secretMaxBookings: 1 });
 tourSchema.index({ secretAccessLevel: 1, secretReleaseDate: 1 });
 
+// Basic indexes
 tourSchema.index({ price: 1, ratingsAverage: -1 });
 tourSchema.index({ slug: 1 });
 tourSchema.index({ startDates: 1 });
@@ -867,15 +1014,60 @@ tourSchema.index({ name: "text", summary: "text", description: "text" });
 tourSchema.index({ category: 1 });
 tourSchema.index({ featured: 1, ratingsAverage: -1 });
 tourSchema.index({ isActive: 1, createdAt: -1 });
-tourSchema.index({ "location.coordinates": "2dsphere" });
-tourSchema.index({ maxGroupSize: 1 });
-tourSchema.index({ minimumAge: 1 });
-tourSchema.index({ physicalRating: 1 });
 
+// Geospatial indexes
+// 2dsphere index for location (main location)
+tourSchema.index({ "location.coordinates": "2dsphere" });
+
+// 2dsphere index for multiple locations
+tourSchema.index({ "locations.coordinates": "2dsphere" });
+
+// Combined geospatial index
+tourSchema.index(
+  { "location.coordinates": "2dsphere", "locations.coordinates": "2dsphere" },
+  { sparse: true },
+);
+
+// Location metadata indexes
+tourSchema.index({ "location.city": 1 });
+tourSchema.index({ "location.country": 1 });
+tourSchema.index({ "location.region": 1 });
+tourSchema.index({ "location.address": "text" });
+
+tourSchema.index({ "locations.city": 1 });
+tourSchema.index({ "locations.country": 1 });
+tourSchema.index({ "locations.region": 1 });
+tourSchema.index({ "locations.address": "text" });
+
+// Geo-fence index
+tourSchema.index({ "geoFence.radius": 1 });
+
+// Combined indexes for common queries
 tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
 tourSchema.index({ category: 1, price: 1, duration: 1 });
 tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
 
+// Location + price + rating
+tourSchema.index({
+  "location.coordinates": "2dsphere",
+  price: 1,
+  ratingsAverage: -1,
+});
+tourSchema.index({
+  "locations.coordinates": "2dsphere",
+  price: 1,
+  ratingsAverage: -1,
+});
+
+// Location + category
+tourSchema.index({ "location.coordinates": "2dsphere", category: 1 });
+tourSchema.index({ "locations.coordinates": "2dsphere", category: 1 });
+
+// Location + difficulty
+tourSchema.index({ "location.coordinates": "2dsphere", difficulty: 1 });
+tourSchema.index({ "locations.coordinates": "2dsphere", difficulty: 1 });
+
+// User related indexes
 tourSchema.index({ createdBy: 1 });
 tourSchema.index({ createdBy: 1, isActive: 1 });
 tourSchema.index({ guides: 1 });
@@ -883,6 +1075,184 @@ tourSchema.index({ guides: 1, isActive: 1 });
 
 tourSchema.index({ createdBy: 1, isActive: 1, createdAt: -1 });
 tourSchema.index({ guides: 1, isActive: 1, createdAt: -1 });
+
+// ==================== STATIC METHODS ====================
+
+// Find tours near a point with distance calculation
+tourSchema.statics.findNear = function findNear(
+  point,
+  maxDistance = 5000,
+  minDistance = 0,
+  limit = 10,
+) {
+  const [lng, lat] = point;
+
+  return this.find()
+    .where("location.coordinates")
+    .near({
+      center: [lng, lat],
+      maxDistance,
+      minDistance,
+      spherical: true,
+    })
+    .limit(limit)
+    .lean();
+};
+
+// Find tours by bounding box
+tourSchema.statics.findInBoundingBox = function findInBoundingBox(
+  southWest,
+  northEast,
+  limit = 10,
+) {
+  return this.find()
+    .where("location.coordinates")
+    .within({
+      box: [southWest, northEast],
+    })
+    .limit(limit)
+    .lean();
+};
+
+// Find tours with location metadata
+tourSchema.statics.findByLocationMetadata = function findByLocationMetadata(
+  city = null,
+  country = null,
+  region = null,
+) {
+  const query = {};
+
+  if (city) query["location.city"] = city;
+  if (country) query["location.country"] = country;
+  if (region) query["location.region"] = region;
+
+  return this.find(query).lean();
+};
+
+// Get location statistics
+tourSchema.statics.getLocationStatistics = function getLocationStatistics() {
+  return this.aggregate([
+    {
+      $group: {
+        _id: "$location.country",
+        count: { $sum: 1 },
+        tours: { $push: { name: "$name", city: "$location.city" } },
+      },
+    },
+    { $sort: { count: -1 } },
+  ]);
+};
+
+// Get tours by distance from multiple points
+tourSchema.statics.findByMultiplePoints = function findByMultiplePoints(
+  points,
+  maxDistance = 5000,
+) {
+  const orConditions = points.map((point) => ({
+    "location.coordinates": {
+      $near: {
+        $geometry: {
+          type: "Point",
+          coordinates: point,
+        },
+        $maxDistance: maxDistance,
+      },
+    },
+  }));
+
+  return this.find({ $or: orConditions }).lean();
+};
+
+// Get tours with locations
+tourSchema.statics.getToursWithLocation = function getToursWithLocation() {
+  return this.find({
+    "location.coordinates": { $exists: true, $ne: null },
+  }).lean();
+};
+
+// ==================== MODEL CREATION ====================
+
+// Add geospatial helper methods to schema
+tourSchema.methods.getGeoJSON = function getGeoJSON() {
+  if (!this.location || !this.location.coordinates) return null;
+
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: this.location.coordinates,
+    },
+    properties: {
+      id: this._id,
+      name: this.name,
+      description: this.description,
+      price: this.price,
+      ratingsAverage: this.ratingsAverage,
+      imageCover: this.imageCover,
+      address: this.location.address,
+      city: this.location.city,
+      country: this.location.country,
+    },
+  };
+};
+
+// Get multiple locations as GeoJSON
+tourSchema.methods.getLocationsGeoJSON = function getLocationsGeoJSON() {
+  if (!this.locations || this.locations.length === 0) return null;
+
+  return {
+    type: "FeatureCollection",
+    features: this.locations.map((loc, index) => ({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: loc.coordinates,
+      },
+      properties: {
+        id: `${this._id}-${index}`,
+        name: this.name,
+        address: loc.address,
+        city: loc.city,
+        country: loc.country,
+        order: loc.order,
+        duration: loc.duration,
+      },
+    })),
+  };
+};
+
+// Calculate distance to a point
+tourSchema.methods.distanceTo = function distanceTo(point) {
+  if (!this.location || !this.location.coordinates) return null;
+
+  const [lng1, lat1] = this.location.coordinates;
+  const [lng2, lat2] = point;
+
+  const R = 6371000; // Earth's radius in meters
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
+
+// Check if point is within radius
+tourSchema.methods.isWithinRadius = function isWithinRadius(
+  point,
+  radius = 5000,
+) {
+  const distance = this.distanceTo(point);
+
+  return distance !== null && distance <= radius;
+};
 
 const Tour = mongoose.models.Tour || mongoose.model("Tour", tourSchema);
 
