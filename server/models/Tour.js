@@ -82,12 +82,239 @@ const tourSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+
+    // ==================== ENHANCED GUIDES SECTION ====================
+    // Main guides array with reference to User model
     guides: [
       {
         type: mongoose.Schema.ObjectId,
         ref: "User",
+        required: [true, "A tour must have at least one guide"],
+        validate: {
+          validator: function validateGuide(_value) {
+            // This validation will be done in pre-save middleware
+            return true;
+          },
+          message: "Invalid guide ID",
+        },
       },
     ],
+
+    // Enhanced guide details with additional metadata
+    guideDetails: {
+      // Lead guide information
+      leadGuide: {
+        type: mongoose.Schema.ObjectId,
+        ref: "User",
+        required: [true, "A tour must have a lead guide"],
+        validate: {
+          validator: function validateLeadGuide(_value) {
+            // This validation will be done in pre-save middleware
+            return true;
+          },
+          message: "Invalid lead guide ID",
+        },
+      },
+      // Assistant guides
+      assistantGuides: [
+        {
+          type: mongoose.Schema.ObjectId,
+          ref: "User",
+        },
+      ],
+      // Guide assignments with specific roles and schedules
+      guideAssignments: [
+        {
+          guideId: {
+            type: mongoose.Schema.ObjectId,
+            ref: "User",
+            required: true,
+          },
+          role: {
+            type: String,
+            enum: ["lead", "assistant", "specialist", "translator", "local"],
+            default: "assistant",
+          },
+          startDate: {
+            type: Date,
+            required: true,
+          },
+          endDate: {
+            type: Date,
+            required: true,
+          },
+          responsibilities: [String],
+          languages: [String],
+          notes: String,
+          isActive: {
+            type: Boolean,
+            default: true,
+          },
+        },
+      ],
+      // Guide requirements
+      requirements: {
+        minGuides: {
+          type: Number,
+          default: 1,
+          min: 0,
+        },
+        maxGuides: {
+          type: Number,
+          default: 5,
+          min: 1,
+        },
+        requiredLanguages: [String],
+        preferredLanguages: [String],
+        requiredCertifications: [String],
+        preferredCertifications: [String],
+        minGuideExperience: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        maxGuideToTouristRatio: {
+          type: Number,
+          default: 20,
+          min: 1,
+        },
+      },
+      // Guide compensation
+      compensation: {
+        type: {
+          type: String,
+          enum: ["fixed", "percentage", "hourly", "daily", "perTourist"],
+          default: "fixed",
+        },
+        amount: {
+          type: Number,
+          min: 0,
+        },
+        currency: {
+          type: String,
+          default: "USD",
+          uppercase: true,
+          maxlength: 3,
+          minlength: 3,
+        },
+        notes: String,
+      },
+      // Guide availability and scheduling
+      scheduling: {
+        shiftPattern: {
+          type: String,
+          enum: ["fixed", "rotating", "flexible"],
+          default: "fixed",
+        },
+        hoursPerDay: {
+          type: Number,
+          default: 8,
+          min: 1,
+          max: 24,
+        },
+        breakDuration: {
+          type: Number,
+          default: 60,
+          min: 0,
+        },
+        overtimeAllowed: {
+          type: Boolean,
+          default: false,
+        },
+        daysOff: [String],
+        // Alternative guides for backup
+        backupGuides: [
+          {
+            type: mongoose.Schema.ObjectId,
+            ref: "User",
+          },
+        ],
+      },
+      // Guide performance tracking
+      performance: {
+        rating: {
+          type: Number,
+          min: 0,
+          max: 5,
+          default: 0,
+        },
+        reviews: {
+          type: Number,
+          default: 0,
+        },
+        completedTours: {
+          type: Number,
+          default: 0,
+        },
+        attendanceRate: {
+          type: Number,
+          min: 0,
+          max: 100,
+          default: 100,
+        },
+        skills: [String],
+        strengths: [String],
+        areasForImprovement: [String],
+      },
+    },
+
+    // Guide-specific ratings and feedback
+    guideRatings: [
+      {
+        guideId: {
+          type: mongoose.Schema.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        rating: {
+          type: Number,
+          required: true,
+          min: 1,
+          max: 5,
+        },
+        review: {
+          type: String,
+          trim: true,
+          maxlength: 500,
+        },
+        reviewerId: {
+          type: mongoose.Schema.ObjectId,
+          ref: "User",
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+        categories: {
+          knowledge: {
+            type: Number,
+            min: 1,
+            max: 5,
+          },
+          communication: {
+            type: Number,
+            min: 1,
+            max: 5,
+          },
+          professionalism: {
+            type: Number,
+            min: 1,
+            max: 5,
+          },
+          punctuality: {
+            type: Number,
+            min: 1,
+            max: 5,
+          },
+          helpfulness: {
+            type: Number,
+            min: 1,
+            max: 5,
+          },
+        },
+      },
+    ],
+
     createdBy: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
@@ -232,6 +459,20 @@ const tourSchema = new mongoose.Schema(
           dinner: Boolean,
         },
         accommodation: String,
+        // Assign guides to specific itinerary days
+        assignedGuides: [
+          {
+            guideId: {
+              type: mongoose.Schema.ObjectId,
+              ref: "User",
+            },
+            role: {
+              type: String,
+              enum: ["lead", "assistant", "specialist"],
+              default: "assistant",
+            },
+          },
+        ],
       },
     ],
     cancellationPolicy: {
@@ -328,170 +569,290 @@ const tourSchema = new mongoose.Schema(
   },
 );
 
-tourSchema.virtual("location.coordinates").get(function getCoordinates() {
-  return this.location && this.location.coordinates
-    ? this.location.coordinates
+// ==================== GUIDE VIRTUALS ====================
+
+// Get guide count
+tourSchema.virtual("guideCount").get(function getGuideCount() {
+  return this.guides ? this.guides.length : 0;
+});
+
+// Get lead guide
+tourSchema.virtual("leadGuideInfo").get(function getLeadGuideInfo() {
+  return this.guideDetails && this.guideDetails.leadGuide
+    ? this.guideDetails.leadGuide
     : null;
 });
 
-tourSchema.virtual("geoJSON").get(function getGeoJSON() {
-  if (!this.location || !this.location.coordinates) return null;
+// Get assistant guides
+tourSchema
+  .virtual("assistantGuideCount")
+  .get(function getAssistantGuideCount() {
+    return this.guideDetails && this.guideDetails.assistantGuides
+      ? this.guideDetails.assistantGuides.length
+      : 0;
+  });
 
-  return {
-    type: "Feature",
-    geometry: {
-      type: "Point",
-      coordinates: this.location.coordinates,
-    },
-    properties: {
-      name: this.name,
-      address: this.location.address,
-      city: this.location.city,
-      country: this.location.country,
-    },
-  };
-});
-
-tourSchema.virtual("centerPoint").get(function getCenterPoint() {
-  if (!this.locations || this.locations.length === 0) {
-    return this.location ? this.location.coordinates : null;
-  }
-
-  const coords = this.locations.map((loc) => loc.coordinates);
-
-  const latSum = coords.reduce((sum, coord) => sum + coord[1], 0);
-  const lngSum = coords.reduce((sum, coord) => sum + coord[0], 0);
-
-  return [lngSum / coords.length, latSum / coords.length];
-});
-
-tourSchema.virtual("locationCount").get(function getLocationCount() {
-  if (this.locations) {
-    return this.locations.length;
-  }
-
-  return this.location ? 1 : 0;
-});
-
-tourSchema.virtual("locationSummary").get(function getLocationSummary() {
-  const parts = [];
-
-  if (this.location) {
-    if (this.location.city) parts.push(this.location.city);
-    if (this.location.country) parts.push(this.location.country);
-    if (this.location.address) parts.push(this.location.address);
-
-    if (parts.length > 0) return parts.join(", ");
-  }
-
-  if (this.locations && this.locations.length > 0) {
-    const uniqueCities = [
-      ...new Set(this.locations.map((l) => l.city).filter(Boolean)),
-    ];
-    const uniqueCountries = [
-      ...new Set(this.locations.map((l) => l.country).filter(Boolean)),
-    ];
-
-    if (uniqueCities.length > 0) {
-      if (uniqueCities.length > 3) {
-        return `${uniqueCities.slice(0, 3).join(", ")} + ${uniqueCities.length - 3} more cities`;
-      }
-
-      return uniqueCities.join(", ");
-    }
-
-    if (uniqueCountries.length > 0) {
-      if (uniqueCountries.length > 2) {
-        return `${uniqueCountries.slice(0, 2).join(", ")} + ${uniqueCountries.length - 2} more countries`;
-      }
-
-      return uniqueCountries.join(", ");
-    }
-  }
-
-  return "Location not specified";
-});
-
-tourSchema.virtual("hasLocation").get(function hasLocation() {
-  return !!(
-    this.location &&
-    this.location.coordinates &&
-    this.location.coordinates.length === 2
-  );
-});
-
-tourSchema.virtual("hasMultipleLocations").get(function hasMultipleLocations() {
-  return !!(this.locations && this.locations.length > 1);
-});
-
-tourSchema.methods.getNearestLocation = function getNearestLocation(point) {
-  if (!this.locations || this.locations.length === 0) {
-    return this.location;
-  }
-
-  const [targetLng, targetLat] = point;
-  let nearest = null;
-  let minDistance = Infinity;
-
-  for (const location of this.locations) {
-    const [lng, lat] = location.coordinates;
-    const distance = Math.sqrt((lng - targetLng) ** 2 + (lat - targetLat) ** 2);
-
-    if (distance < minDistance) {
-      minDistance = distance;
-      nearest = location;
-    }
-  }
-
-  return nearest;
-};
-
-tourSchema.methods.getSortedLocationsByDistance =
-  function getSortedLocationsByDistance(point) {
-    if (!this.locations || this.locations.length === 0) {
+// Get active guide assignments
+tourSchema
+  .virtual("activeGuideAssignments")
+  .get(function getActiveGuideAssignments() {
+    if (!this.guideDetails || !this.guideDetails.guideAssignments) {
       return [];
     }
 
-    const [targetLng, targetLat] = point;
+    return this.guideDetails.guideAssignments.filter(
+      (assignment) => assignment.isActive,
+    );
+  });
 
-    return [...this.locations].sort((a, b) => {
-      const [aLng, aLat] = a.coordinates;
-      const [bLng, bLat] = b.coordinates;
-      const distA = Math.sqrt(
-        (aLng - targetLng) ** 2 + (aLat - targetLat) ** 2,
-      );
-      const distB = Math.sqrt(
-        (bLng - targetLng) ** 2 + (bLat - targetLat) ** 2,
-      );
+// Get guide summary
+tourSchema.virtual("guideSummary").get(function getGuideSummary() {
+  const details = this.guideDetails || {};
+  const leadGuide = details.leadGuide || "Not assigned";
+  const assistantCount = details.assistantGuides
+    ? details.assistantGuides.length
+    : 0;
+  const totalGuides = this.guides ? this.guides.length : 0;
 
-      return distA - distB;
-    });
+  return {
+    totalGuides,
+    leadGuide,
+    assistantGuides: assistantCount,
+    hasGuideAssignments: !!(
+      details.guideAssignments && details.guideAssignments.length > 0
+    ),
+    guideToTouristRatio: details.requirements
+      ? details.requirements.maxGuideToTouristRatio
+      : null,
   };
+});
 
-tourSchema.methods.calculateDistance = function calculateDistance(
-  coord1,
-  coord2,
+// Check if tour has guide requirements
+tourSchema.virtual("hasGuideRequirements").get(function hasGuideRequirements() {
+  return !!(this.guideDetails && this.guideDetails.requirements);
+});
+
+// Get guide average rating
+tourSchema.virtual("guideAverageRating").get(function getGuideAverageRating() {
+  if (!this.guideRatings || this.guideRatings.length === 0) {
+    return 0;
+  }
+
+  const total = this.guideRatings.reduce(
+    (sum, rating) => sum + rating.rating,
+    0,
+  );
+
+  return Math.round((total / this.guideRatings.length) * 10) / 10;
+});
+
+// Check if guide is fully staffed
+tourSchema.virtual("isFullyStaffed").get(function isFullyStaffed() {
+  const requirements = this.guideDetails?.requirements || {};
+  const minGuides = requirements.minGuides || 1;
+  const currentGuides = this.guides ? this.guides.length : 0;
+
+  return currentGuides >= minGuides;
+});
+
+// Check if guide capacity is met
+tourSchema.virtual("hasGuideCapacity").get(function hasGuideCapacity() {
+  const requirements = this.guideDetails?.requirements || {};
+  const maxGuides = requirements.maxGuides || 5;
+  const currentGuides = this.guides ? this.guides.length : 0;
+
+  return currentGuides < maxGuides;
+});
+
+// ==================== GUIDE METHODS ====================
+
+// Add a guide to the tour
+tourSchema.methods.addGuide = function addGuide(
+  guideId,
+  role = "assistant",
+  startDate = new Date(),
+  endDate = null,
 ) {
-  const [lng1, lat1] = coord1;
-  const [lng2, lat2] = coord2;
+  if (!this.guides) {
+    this.guides = [];
+  }
 
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  // Check if guide already exists
+  if (this.guides.includes(guideId)) {
+    throw new Error("Guide already assigned to this tour");
+  }
 
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
+  // Check guide capacity
+  const requirements = this.guideDetails?.requirements || {};
+  const maxGuides = requirements.maxGuides || 5;
 
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  if (this.guides.length >= maxGuides) {
+    throw new Error(`Maximum guide capacity of ${maxGuides} reached`);
+  }
 
-  return R * c;
+  // Add to guides array
+  this.guides.push(guideId);
+
+  // Add to guide assignments if guideDetails exists
+  if (this.guideDetails) {
+    if (!this.guideDetails.guideAssignments) {
+      this.guideDetails.guideAssignments = [];
+    }
+
+    // Set end date to tour end if not provided
+    let finalEndDate = endDate;
+
+    if (!finalEndDate) {
+      const lastStartDate =
+        this.startDates && this.startDates.length > 0
+          ? new Date(Math.max(...this.startDates.map((d) => new Date(d))))
+          : new Date();
+
+      finalEndDate = new Date(lastStartDate);
+      finalEndDate.setDate(finalEndDate.getDate() + (this.duration || 1));
+    }
+
+    this.guideDetails.guideAssignments.push({
+      guideId,
+      role,
+      startDate,
+      endDate: finalEndDate,
+      isActive: true,
+    });
+  }
+
+  return this;
 };
 
+// Remove a guide from the tour
+tourSchema.methods.removeGuide = function removeGuide(guideId) {
+  if (!this.guides) {
+    throw new Error("No guides assigned to this tour");
+  }
+
+  // Remove from guides array
+  this.guides = this.guides.filter(
+    (id) => id.toString() !== guideId.toString(),
+  );
+
+  // Deactivate assignment if exists
+  if (this.guideDetails && this.guideDetails.guideAssignments) {
+    const assignment = this.guideDetails.guideAssignments.find(
+      (a) => a.guideId.toString() === guideId.toString(),
+    );
+
+    if (assignment) {
+      assignment.isActive = false;
+    }
+  }
+
+  return this;
+};
+
+// Set lead guide
+tourSchema.methods.setLeadGuide = function setLeadGuide(guideId) {
+  if (!this.guides || !this.guides.includes(guideId)) {
+    throw new Error("Guide must be assigned to the tour first");
+  }
+
+  if (!this.guideDetails) {
+    this.guideDetails = {};
+  }
+
+  this.guideDetails.leadGuide = guideId;
+
+  // Update assignment role
+  if (this.guideDetails.guideAssignments) {
+    const assignment = this.guideDetails.guideAssignments.find(
+      (a) => a.guideId.toString() === guideId.toString(),
+    );
+
+    if (assignment) {
+      assignment.role = "lead";
+    }
+  }
+
+  return this;
+};
+
+// Add guide rating
+tourSchema.methods.addGuideRating = function addGuideRating(
+  guideId,
+  rating,
+  review = "",
+  reviewerId = null,
+  categories = {},
+) {
+  if (rating < 1 || rating > 5) {
+    throw new Error("Rating must be between 1 and 5");
+  }
+
+  if (!this.guideRatings) {
+    this.guideRatings = [];
+  }
+
+  this.guideRatings.push({
+    guideId,
+    rating,
+    review,
+    reviewerId,
+    categories,
+    createdAt: new Date(),
+  });
+
+  return this;
+};
+
+// Get guide rating by guide ID
+tourSchema.methods.getGuideRating = function getGuideRating(guideId) {
+  if (!this.guideRatings) {
+    return null;
+  }
+
+  const ratings = this.guideRatings.filter(
+    (r) => r.guideId.toString() === guideId.toString(),
+  );
+
+  if (ratings.length === 0) {
+    return null;
+  }
+
+  const average =
+    ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+
+  return {
+    average: Math.round(average * 10) / 10,
+    count: ratings.length,
+    ratings,
+  };
+};
+
+// Get guide assignment by guide ID
+tourSchema.methods.getGuideAssignment = function getGuideAssignment(guideId) {
+  if (!this.guideDetails || !this.guideDetails.guideAssignments) {
+    return null;
+  }
+
+  return (
+    this.guideDetails.guideAssignments.find(
+      (a) => a.guideId.toString() === guideId.toString(),
+    ) || null
+  );
+};
+
+// Check if guide is assigned to tour
+tourSchema.methods.isGuideAssigned = function isGuideAssigned(guideId) {
+  if (!this.guides) {
+    return false;
+  }
+
+  return this.guides.some((id) => id.toString() === guideId.toString());
+};
+
+// ==================== GUIDE QUERY METHODS ====================
+
 tourSchema.query = {
+  // Existing query methods...
   priceRange(min, max) {
     return this.where("price").gte(min).lte(max);
   },
@@ -577,12 +938,78 @@ tourSchema.query = {
 
   selectDetailed() {
     return this.select(
-      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize location locations",
+      "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize location locations guideDetails",
     );
   },
 
   withVirtuals() {
     return this.lean().select("+virtuals");
+  },
+
+  // ==================== GUIDE QUERY METHODS ====================
+
+  // Find tours by guide ID
+  byGuide(guideId) {
+    return this.where("guides").in([guideId]);
+  },
+
+  // Find tours by lead guide
+  byLeadGuide(guideId) {
+    return this.where("guideDetails.leadGuide").equals(guideId);
+  },
+
+  // Find tours by guide role
+  byGuideRole(role) {
+    return this.where("guideDetails.guideAssignments.role").equals(role);
+  },
+
+  // Find tours with guide requirements
+  withGuideRequirements() {
+    return this.where("guideDetails.requirements").exists(true);
+  },
+
+  byGuideLanguage(language) {
+    return this.where("guideDetails.requirements.requiredLanguages").in([
+      language,
+    ]);
+  },
+
+  byGuideExperience(minYears = 0) {
+    return this.where("guideDetails.requirements.minGuideExperience").gte(
+      minYears,
+    );
+  },
+
+  withActiveGuideAssignments() {
+    return this.where("guideDetails.guideAssignments.isActive").equals(true);
+  },
+
+  byGuideCapacity(min = 1, max = null) {
+    let query = this.where("guideDetails.requirements.minGuides").gte(min);
+
+    if (max !== null) {
+      query = query.where("guideDetails.requirements.maxGuides").lte(max);
+    }
+
+    return query;
+  },
+
+  byGuideRating(minRating = 0) {
+    return this.where("guideDetails.performance.rating").gte(minRating);
+  },
+
+  byCompensationType(type) {
+    return this.where("guideDetails.compensation.type").equals(type);
+  },
+
+  fullyStaffed() {
+    return this.where("guideDetails.requirements.minGuides").lte(
+      this.where("guides.length"),
+    );
+  },
+
+  hasGuideAvailability() {
+    return this.where("guideDetails.scheduling.backupGuides").exists(true);
   },
 
   near(point, maxDistance = 5000, minDistance = 0) {
@@ -634,7 +1061,6 @@ tourSchema.query = {
     return this.where("locations.0").exists(true);
   },
 
-  // Find tours with specific location count
   locationCount(min = 1, max = null) {
     let query = this.where("locations").size(min);
 
@@ -645,22 +1071,18 @@ tourSchema.query = {
     return query;
   },
 
-  // Find tours by location activity
   byLocationActivity(activity) {
     return this.where("locations.activities").in([activity]);
   },
 
-  // Find tours by accommodation type at locations
   byLocationAccommodation(accommodation) {
     return this.where("locations.accommodation").equals(accommodation);
   },
 
-  // Find tours with geo-fence
   withGeoFence() {
     return this.where("geoFence.radius").gt(0);
   },
 
-  // Enhanced secret methods
   includeSecret() {
     this._includeSecret = true;
 
@@ -736,7 +1158,6 @@ tourSchema.query = {
     });
   },
 
-  // Enhanced location sorting
   sortByDistance(point) {
     const [lng, lat] = point;
 
@@ -771,13 +1192,129 @@ tourSchema.query = {
     ]);
   },
 
-  // Sort by number of locations
   sortByLocationCount(asc = false) {
     return this.sort({ locationCount: asc ? 1 : -1 });
   },
+
+  sortByGuideCount(asc = false) {
+    return this.sort({ guideCount: asc ? 1 : -1 });
+  },
+
+  sortByGuideRating(asc = false) {
+    return this.sort({ "guideDetails.performance.rating": asc ? 1 : -1 });
+  },
+
+  sortByGuideExperience(asc = false) {
+    return this.sort({
+      "guideDetails.requirements.minGuideExperience": asc ? 1 : -1,
+    });
+  },
 };
 
-// ==================== MIDDLEWARE ====================
+tourSchema.pre("save", function preSaveMiddleware(next) {
+  try {
+    if (this.isSecret && !this.secretCode) {
+      const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      this.secretCode = `SEC-${Date.now().toString(36).toUpperCase()}-${random}`;
+    }
+
+    if (this.isSecret) {
+      if (!this.secretAccessLevel || this.secretAccessLevel === "public") {
+        this.secretAccessLevel = "vip";
+      }
+
+      if (!this.secretMaxBookings || this.secretMaxBookings < 1) {
+        this.secretMaxBookings = 10;
+      }
+
+      if (!this.secretExpiryDate) {
+        const defaultExpiry = new Date();
+
+        defaultExpiry.setMonth(defaultExpiry.getMonth() + 6);
+        this.secretExpiryDate = defaultExpiry;
+      }
+    }
+
+    if (this.guideDetails && this.guideDetails.requirements) {
+      const { minGuides, maxGuides } = this.guideDetails.requirements;
+
+      if (minGuides && maxGuides && minGuides > maxGuides) {
+        throw new Error("Minimum guides cannot be greater than maximum guides");
+      }
+
+      if (this.guides && minGuides && this.guides.length < minGuides) {
+        throw new Error(`Tour requires at least ${minGuides} guides`);
+      }
+
+      if (this.guides && maxGuides && this.guides.length > maxGuides) {
+        throw new Error(`Tour cannot have more than ${maxGuides} guides`);
+      }
+    }
+
+    if (this.guideDetails && this.guideDetails.leadGuide) {
+      if (!this.guides || !this.guides.includes(this.guideDetails.leadGuide)) {
+        throw new Error("Lead guide must be assigned to the tour");
+      }
+    }
+
+    if (this.guideDetails && this.guideDetails.guideAssignments) {
+      for (const assignment of this.guideDetails.guideAssignments) {
+        if (!this.guides || !this.guides.includes(assignment.guideId)) {
+          throw new Error(
+            `Guide ${assignment.guideId} must be assigned to the tour`,
+          );
+        }
+
+        if (
+          assignment.startDate &&
+          assignment.endDate &&
+          assignment.startDate > assignment.endDate
+        ) {
+          throw new Error("Assignment start date must be before end date");
+        }
+      }
+    }
+
+    if (this.itinerary) {
+      for (const day of this.itinerary) {
+        if (day.assignedGuides) {
+          for (const assigned of day.assignedGuides) {
+            if (!this.guides || !this.guides.includes(assigned.guideId)) {
+              throw new Error(
+                `Guide ${assigned.guideId} must be assigned to the tour`,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (this.location && this.location.coordinates) {
+      const [lng, lat] = this.location.coordinates;
+
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        throw new Error(
+          "Invalid coordinates. Longitude must be -180 to 180, latitude -90 to 90",
+        );
+      }
+    }
+
+    if (this.locations && this.locations.length > 0) {
+      for (const loc of this.locations) {
+        const [lng, lat] = loc.coordinates;
+
+        if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+          throw new Error(`Invalid coordinates for location: ${loc.address}`);
+        }
+      }
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 tourSchema.pre("find", function preFindMiddleware(next) {
   try {
@@ -804,9 +1341,12 @@ tourSchema.post("find", function postFindMiddleware(docs, next) {
     if (docs && docs.length > 0) {
       const secretCount = docs.filter((doc) => doc.isSecret).length;
       const locationCount = docs.filter((doc) => doc.hasLocation).length;
+      const guideCount = docs.filter(
+        (doc) => doc.guides && doc.guides.length > 0,
+      ).length;
 
       console.log(
-        `🔍 Found ${docs.length} tours (${secretCount} secret tours, ${locationCount} with location)`,
+        `🔍 Found ${docs.length} tours (${secretCount} secret tours, ${locationCount} with location, ${guideCount} with guides)`,
       );
     }
     next();
@@ -836,8 +1376,14 @@ tourSchema.post("findOne", function postFindOneMiddleware(doc, next) {
     if (doc) {
       const secretStatus = doc.isSecret ? "🔒 SECRET" : "📄";
       const locationStatus = doc.hasLocation ? "📍" : "📍❌";
+      const guideStatus =
+        doc.guides && doc.guides.length > 0
+          ? `👥 ${doc.guides.length} guides`
+          : "👥 No guides";
 
-      console.log(`${secretStatus} ${locationStatus} Found tour: ${doc.name}`);
+      console.log(
+        `${secretStatus} ${locationStatus} ${guideStatus} Found tour: ${doc.name}`,
+      );
     }
     next();
   } catch (error) {
@@ -869,61 +1415,6 @@ tourSchema.pre("findById", function preFindByIdMiddleware(next) {
 
     if (!this._includeSecret && !this._skipSecretFilter) {
       this.where("isSecret").equals(false);
-    }
-
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-tourSchema.pre("save", function preSaveMiddleware(next) {
-  try {
-    // Generate secret code if needed
-    if (this.isSecret && !this.secretCode) {
-      const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-
-      this.secretCode = `SEC-${Date.now().toString(36).toUpperCase()}-${random}`;
-    }
-
-    // Set secret defaults
-    if (this.isSecret) {
-      if (!this.secretAccessLevel || this.secretAccessLevel === "public") {
-        this.secretAccessLevel = "vip";
-      }
-
-      if (!this.secretMaxBookings || this.secretMaxBookings < 1) {
-        this.secretMaxBookings = 10;
-      }
-
-      if (!this.secretExpiryDate) {
-        const defaultExpiry = new Date();
-
-        defaultExpiry.setMonth(defaultExpiry.getMonth() + 6);
-        this.secretExpiryDate = defaultExpiry;
-      }
-    }
-
-    // Validate geospatial data
-    if (this.location && this.location.coordinates) {
-      const [lng, lat] = this.location.coordinates;
-
-      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-        throw new Error(
-          "Invalid coordinates. Longitude must be -180 to 180, latitude -90 to 90",
-        );
-      }
-    }
-
-    // Validate multiple locations
-    if (this.locations && this.locations.length > 0) {
-      for (const loc of this.locations) {
-        const [lng, lat] = loc.coordinates;
-
-        if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-          throw new Error(`Invalid coordinates for location: ${loc.address}`);
-        }
-      }
     }
 
     next();
@@ -987,9 +1478,6 @@ tourSchema.post("aggregate", function postAggregateMiddleware(result, next) {
   }
 });
 
-// ==================== INDEXES ====================
-
-// Secret indexes
 tourSchema.index({ isSecret: 1 });
 tourSchema.index({ secretCode: 1 }, { unique: true, sparse: true });
 tourSchema.index({ secretAccessLevel: 1 });
@@ -1003,7 +1491,6 @@ tourSchema.index({ isSecret: 1, secretReleaseDate: 1, secretExpiryDate: 1 });
 tourSchema.index({ isSecret: 1, secretBookings: 1, secretMaxBookings: 1 });
 tourSchema.index({ secretAccessLevel: 1, secretReleaseDate: 1 });
 
-// Basic indexes
 tourSchema.index({ price: 1, ratingsAverage: -1 });
 tourSchema.index({ slug: 1 });
 tourSchema.index({ startDates: 1 });
@@ -1015,20 +1502,32 @@ tourSchema.index({ category: 1 });
 tourSchema.index({ featured: 1, ratingsAverage: -1 });
 tourSchema.index({ isActive: 1, createdAt: -1 });
 
-// Geospatial indexes
-// 2dsphere index for location (main location)
-tourSchema.index({ "location.coordinates": "2dsphere" });
+tourSchema.index({ guides: 1 });
+tourSchema.index({ "guideDetails.leadGuide": 1 });
+tourSchema.index({ "guideDetails.guideAssignments.guideId": 1 });
+tourSchema.index({ "guideDetails.guideAssignments.role": 1 });
+tourSchema.index({ "guideDetails.requirements.minGuides": 1 });
+tourSchema.index({ "guideDetails.requirements.maxGuides": 1 });
+tourSchema.index({ "guideDetails.requirements.requiredLanguages": 1 });
+tourSchema.index({ "guideDetails.performance.rating": 1 });
+tourSchema.index({ "guideDetails.compensation.type": 1 });
+tourSchema.index({ "guideDetails.scheduling.backupGuides": 1 });
+tourSchema.index({ "guideRatings.guideId": 1 });
+tourSchema.index({ "itinerary.assignedGuides.guideId": 1 });
 
-// 2dsphere index for multiple locations
+tourSchema.index({ guides: 1, isActive: 1 });
+tourSchema.index({ "guideDetails.leadGuide": 1, isActive: 1 });
+tourSchema.index({ guides: 1, startDates: 1 });
+tourSchema.index({ "guideDetails.leadGuide": 1, startDates: 1 });
+
+tourSchema.index({ "location.coordinates": "2dsphere" });
 tourSchema.index({ "locations.coordinates": "2dsphere" });
 
-// Combined geospatial index
 tourSchema.index(
   { "location.coordinates": "2dsphere", "locations.coordinates": "2dsphere" },
   { sparse: true },
 );
 
-// Location metadata indexes
 tourSchema.index({ "location.city": 1 });
 tourSchema.index({ "location.country": 1 });
 tourSchema.index({ "location.region": 1 });
@@ -1039,15 +1538,12 @@ tourSchema.index({ "locations.country": 1 });
 tourSchema.index({ "locations.region": 1 });
 tourSchema.index({ "locations.address": "text" });
 
-// Geo-fence index
 tourSchema.index({ "geoFence.radius": 1 });
 
-// Combined indexes for common queries
 tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
 tourSchema.index({ category: 1, price: 1, duration: 1 });
 tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
 
-// Location + price + rating
 tourSchema.index({
   "location.coordinates": "2dsphere",
   price: 1,
@@ -1059,15 +1555,12 @@ tourSchema.index({
   ratingsAverage: -1,
 });
 
-// Location + category
 tourSchema.index({ "location.coordinates": "2dsphere", category: 1 });
 tourSchema.index({ "locations.coordinates": "2dsphere", category: 1 });
 
-// Location + difficulty
 tourSchema.index({ "location.coordinates": "2dsphere", difficulty: 1 });
 tourSchema.index({ "locations.coordinates": "2dsphere", difficulty: 1 });
 
-// User related indexes
 tourSchema.index({ createdBy: 1 });
 tourSchema.index({ createdBy: 1, isActive: 1 });
 tourSchema.index({ guides: 1 });
@@ -1076,103 +1569,122 @@ tourSchema.index({ guides: 1, isActive: 1 });
 tourSchema.index({ createdBy: 1, isActive: 1, createdAt: -1 });
 tourSchema.index({ guides: 1, isActive: 1, createdAt: -1 });
 
-// ==================== STATIC METHODS ====================
-
-// Find tours near a point with distance calculation
-tourSchema.statics.findNear = function findNear(
-  point,
-  maxDistance = 5000,
-  minDistance = 0,
-  limit = 10,
+tourSchema.statics.findByGuide = function findByGuide(
+  guideId,
+  populateGuides = true,
 ) {
-  const [lng, lat] = point;
+  let query = this.find({ guides: guideId });
 
-  return this.find()
-    .where("location.coordinates")
-    .near({
-      center: [lng, lat],
-      maxDistance,
-      minDistance,
-      spherical: true,
-    })
-    .limit(limit)
-    .lean();
+  if (populateGuides) {
+    query = query.populate("guides").populate("guideDetails.leadGuide");
+  }
+
+  return query.lean();
 };
 
-// Find tours by bounding box
-tourSchema.statics.findInBoundingBox = function findInBoundingBox(
-  southWest,
-  northEast,
-  limit = 10,
+tourSchema.statics.findByGuideRole = function findByGuideRole(
+  role,
+  populateGuides = true,
 ) {
-  return this.find()
-    .where("location.coordinates")
-    .within({
-      box: [southWest, northEast],
-    })
-    .limit(limit)
-    .lean();
+  let query = this.find({ "guideDetails.guideAssignments.role": role });
+
+  if (populateGuides) {
+    query = query.populate("guides").populate("guideDetails.leadGuide");
+  }
+
+  return query.lean();
 };
 
-// Find tours with location metadata
-tourSchema.statics.findByLocationMetadata = function findByLocationMetadata(
-  city = null,
-  country = null,
-  region = null,
-) {
-  const query = {};
-
-  if (city) query["location.city"] = city;
-  if (country) query["location.country"] = country;
-  if (region) query["location.region"] = region;
-
-  return this.find(query).lean();
-};
-
-// Get location statistics
-tourSchema.statics.getLocationStatistics = function getLocationStatistics() {
+tourSchema.statics.getGuideStatistics = function getGuideStatistics() {
   return this.aggregate([
     {
       $group: {
-        _id: "$location.country",
-        count: { $sum: 1 },
-        tours: { $push: { name: "$name", city: "$location.city" } },
+        _id: null,
+        totalTours: { $sum: 1 },
+        totalGuides: { $sum: { $size: "$guides" } },
+        averageGuidesPerTour: { $avg: { $size: "$guides" } },
+        maxGuidesInTour: { $max: { $size: "$guides" } },
+        minGuidesInTour: { $min: { $size: "$guides" } },
+        toursWithLeadGuide: {
+          $sum: {
+            $cond: [{ $ifNull: ["$guideDetails.leadGuide", false] }, 1, 0],
+          },
+        },
+        toursWithAssistantGuides: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $ifNull: ["$guideDetails.assistantGuides", false] },
+                  { $gt: [{ $size: "$guideDetails.assistantGuides" }, 0] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
       },
     },
-    { $sort: { count: -1 } },
   ]);
 };
 
-// Get tours by distance from multiple points
-tourSchema.statics.findByMultiplePoints = function findByMultiplePoints(
-  points,
-  maxDistance = 5000,
-) {
-  const orConditions = points.map((point) => ({
-    "location.coordinates": {
-      $near: {
-        $geometry: {
-          type: "Point",
-          coordinates: point,
+tourSchema.statics.getGuidePerformanceSummary =
+  function getGuidePerformanceSummary(guideId) {
+    return this.aggregate([
+      { $match: { guides: guideId } },
+      {
+        $unwind: {
+          path: "$guideRatings",
+          preserveNullAndEmptyArrays: true,
         },
-        $maxDistance: maxDistance,
       },
-    },
-  }));
+      {
+        $match: {
+          "guideRatings.guideId": guideId,
+        },
+      },
+      {
+        $group: {
+          _id: "$_id",
+          tourName: { $first: "$name" },
+          totalRatings: { $sum: 1 },
+          averageRating: { $avg: "$guideRatings.rating" },
+          averageKnowledge: { $avg: "$guideRatings.categories.knowledge" },
+          averageCommunication: {
+            $avg: "$guideRatings.categories.communication",
+          },
+          averageProfessionalism: {
+            $avg: "$guideRatings.categories.professionalism",
+          },
+          averagePunctuality: { $avg: "$guideRatings.categories.punctuality" },
+          averageHelpfulness: { $avg: "$guideRatings.categories.helpfulness" },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          tours: { $push: "$$ROOT" },
+          totalTours: { $sum: 1 },
+          overallAverageRating: { $avg: "$averageRating" },
+        },
+      },
+    ]);
+  };
 
-  return this.find({ $or: orConditions }).lean();
+tourSchema.methods.populateGuides = async function populateGuides() {
+  await this.populate("guides")
+    .populate("guideDetails.leadGuide")
+    .populate("guideDetails.assistantGuides")
+    .populate("guideDetails.guideAssignments.guideId")
+    .populate("guideDetails.scheduling.backupGuides")
+    .populate("guideRatings.guideId")
+    .populate("guideRatings.reviewerId")
+    .populate("itinerary.assignedGuides.guideId");
+
+  return this;
 };
 
-// Get tours with locations
-tourSchema.statics.getToursWithLocation = function getToursWithLocation() {
-  return this.find({
-    "location.coordinates": { $exists: true, $ne: null },
-  }).lean();
-};
-
-// ==================== MODEL CREATION ====================
-
-// Add geospatial helper methods to schema
 tourSchema.methods.getGeoJSON = function getGeoJSON() {
   if (!this.location || !this.location.coordinates) return null;
 
@@ -1196,7 +1708,6 @@ tourSchema.methods.getGeoJSON = function getGeoJSON() {
   };
 };
 
-// Get multiple locations as GeoJSON
 tourSchema.methods.getLocationsGeoJSON = function getLocationsGeoJSON() {
   if (!this.locations || this.locations.length === 0) return null;
 
@@ -1221,14 +1732,13 @@ tourSchema.methods.getLocationsGeoJSON = function getLocationsGeoJSON() {
   };
 };
 
-// Calculate distance to a point
 tourSchema.methods.distanceTo = function distanceTo(point) {
   if (!this.location || !this.location.coordinates) return null;
 
   const [lng1, lat1] = this.location.coordinates;
   const [lng2, lat2] = point;
 
-  const R = 6371000; // Earth's radius in meters
+  const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
 
@@ -1244,7 +1754,6 @@ tourSchema.methods.distanceTo = function distanceTo(point) {
   return R * c;
 };
 
-// Check if point is within radius
 tourSchema.methods.isWithinRadius = function isWithinRadius(
   point,
   radius = 5000,
