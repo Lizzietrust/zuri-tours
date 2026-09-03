@@ -114,6 +114,56 @@ const populateGuideFields = (query, populateOptions = {}) => {
   return populatedQuery;
 };
 
+const populateReviewVirtuals = (query, options = {}) => {
+  const {
+    populateReviews = true,
+    reviewType = "approved",
+    reviewLimit = 10,
+    reviewSort = "-createdAt",
+    populateReviewUsers = true,
+    populateReviewTour = false,
+    reviewsOnly = false,
+  } = options;
+
+  let populatedQuery = query;
+
+  if (!populateReviews) {
+    return populatedQuery;
+  }
+
+  let virtualField = "reviews";
+
+  if (reviewType === "all") virtualField = "allReviews";
+  else if (reviewType === "recent") virtualField = "recentReviews";
+  else if (reviewType === "top") virtualField = "topReviews";
+
+  if (!reviewsOnly) {
+    populatedQuery = populatedQuery.populate({
+      path: virtualField,
+      options: {
+        limit: reviewLimit,
+        sort: reviewSort,
+      },
+    });
+  }
+
+  if (populateReviewUsers && !reviewsOnly) {
+    populatedQuery = populatedQuery.populate({
+      path: `${virtualField}.user`,
+      select: "name email profileImage role bio",
+    });
+  }
+
+  if (populateReviewTour && !reviewsOnly) {
+    populatedQuery = populatedQuery.populate({
+      path: `${virtualField}.tour`,
+      select: "name slug price duration difficulty imageCover",
+    });
+  }
+
+  return populatedQuery;
+};
+
 export const getAllTours = catchAsync(async (req, res) => {
   const { tours, pagination, count } =
     await TourQueryService.executePaginatedQuery(req.query);
@@ -126,6 +176,12 @@ export const getAllTours = catchAsync(async (req, res) => {
     req.query.populateGuideAssignments === "true";
   const populateGuideRatings = req.query.populateGuideRatings === "true";
 
+  const populateReviews = req.query.populateReviews !== "false";
+  const reviewType = req.query.reviewType || "approved";
+  const reviewLimit = parseInt(req.query.reviewLimit, 10) || 3;
+  const reviewSort = req.query.reviewSort || "-createdAt";
+  const populateReviewUsers = req.query.populateReviewUsers !== "false";
+
   const tourIds = tours.map((tour) => tour._id);
 
   let query = Tour.find({ _id: { $in: tourIds } });
@@ -137,6 +193,14 @@ export const getAllTours = catchAsync(async (req, res) => {
     populateAssistantGuides,
     populateGuideAssignments,
     populateGuideRatings,
+  });
+
+  query = populateReviewVirtuals(query, {
+    populateReviews,
+    reviewType,
+    reviewLimit,
+    reviewSort,
+    populateReviewUsers,
   });
 
   const populatedTours = await query.lean();
@@ -164,6 +228,14 @@ export const getTour = catchAsync(async (req, res) => {
   const populateReviewers = req.query.populateReviewers === "true";
   const populateItineraryGuides = req.query.populateItineraryGuides === "true";
 
+  const populateReviews = req.query.populateReviews !== "false";
+  const reviewType = req.query.reviewType || "approved";
+  const reviewLimit = parseInt(req.query.reviewLimit, 10) || 10;
+  const reviewSort = req.query.reviewSort || "-createdAt";
+  const populateReviewUsers = req.query.populateReviewUsers !== "false";
+  const populateReviewTour = req.query.populateReviewTour === "true";
+  const reviewsOnly = req.query.reviewsOnly === "true";
+
   let query;
 
   if (isMongoId) {
@@ -182,6 +254,16 @@ export const getTour = catchAsync(async (req, res) => {
     populateBackupGuides,
     populateReviewers,
     populateItineraryGuides,
+  });
+
+  query = populateReviewVirtuals(query, {
+    populateReviews,
+    reviewType,
+    reviewLimit,
+    reviewSort,
+    populateReviewUsers,
+    populateReviewTour,
+    reviewsOnly,
   });
 
   const tour = await query.lean();
@@ -266,6 +348,15 @@ export const createTour = catchAsync(async (req, res) => {
       path: "guideDetails.assistantGuides",
       select: "name email role profileImage bio",
     })
+
+    .populate({
+      path: "reviews",
+      options: { limit: 5, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
+    })
     .lean();
 
   res.status(201).json({
@@ -319,7 +410,6 @@ export const updateTour = catchAsync(async (req, res) => {
     const guidesToAdd = newGuideIds.filter(
       (id) => !currentGuideIds.includes(id),
     );
-
     const guidesToRemove = currentGuideIds.filter(
       (id) => !newGuideIds.includes(id),
     );
@@ -356,6 +446,15 @@ export const updateTour = catchAsync(async (req, res) => {
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
     })
+
+    .populate({
+      path: "reviews",
+      options: { limit: 5, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
+    })
     .lean();
 
   res.status(200).json({
@@ -386,10 +485,113 @@ export const deleteTour = catchAsync(async (req, res) => {
   });
 });
 
+export const getTourWithReviews = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const {
+    reviewPage = 1,
+    reviewLimit = 10,
+    reviewSort = "-createdAt",
+    reviewMinRating,
+    reviewMaxRating,
+  } = req.query;
+
+  const isMongoId = id.match(/^[0-9a-fA-F]{24}$/);
+
+  let query;
+
+  if (isMongoId) {
+    query = Tour.findById(id);
+  } else {
+    query = Tour.findOne({ slug: id });
+  }
+
+  query = query
+    .populate({
+      path: "guides",
+      select: "name email role profileImage",
+    })
+    .populate({
+      path: "guideDetails.leadGuide",
+      select: "name email role profileImage",
+    });
+
+  const tour = await query.lean();
+
+  if (!tour) {
+    throw new AppError("Tour not found", 404);
+  }
+
+  const Review = (await import("../models/Review.js")).default;
+
+  const reviewQuery = Review.find({
+    tour: tour._id,
+    status: "approved",
+  });
+
+  if (reviewMinRating) {
+    reviewQuery.where("rating").gte(parseFloat(reviewMinRating));
+  }
+  if (reviewMaxRating) {
+    reviewQuery.where("rating").lte(parseFloat(reviewMaxRating));
+  }
+
+  const pageNum = parseInt(reviewPage, 10);
+  const limitNum = parseInt(reviewLimit, 10);
+  const skip = (pageNum - 1) * limitNum;
+
+  reviewQuery.sort(reviewSort).skip(skip).limit(limitNum).populate({
+    path: "user",
+    select: "name email profileImage",
+  });
+
+  const reviews = await reviewQuery.lean();
+  const totalReviews = await Review.countDocuments({
+    tour: tour._id,
+    status: "approved",
+  });
+
+  const stats = await Review.getReviewStats(tour._id);
+
+  const distribution = await Review.getRatingDistribution(tour._id);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      tour,
+      reviews: {
+        data: reviews,
+        total: totalReviews,
+        page: pageNum,
+        pages: Math.ceil(totalReviews / limitNum),
+        limit: limitNum,
+      },
+      stats: stats || {
+        totalReviews: 0,
+        averageRating: 0,
+        minRating: 0,
+        maxRating: 0,
+        totalRatingSum: 0,
+        verifiedPurchases: 0,
+        recommendedCount: 0,
+        totalHelpful: 0,
+        recommendationRate: 0,
+        verifiedRate: 0,
+        averageHelpfulPerReview: 0,
+      },
+      distribution: distribution || {
+        distribution: [],
+        percentages: [],
+        total: 0,
+      },
+    },
+  });
+});
+
 export const getToursByPriceRange = catchAsync(async (req, res) => {
   const minPrice = parseInt(req.query.min, 10) || 0;
   const maxPrice = parseInt(req.query.max, 10) || 10000;
   const populateGuides = req.query.populateGuides !== "false";
+  const populateReviews = req.query.populateReviews !== "false";
 
   let query = Tour.find({
     price: { $gte: minPrice, $lte: maxPrice },
@@ -401,6 +603,17 @@ export const getToursByPriceRange = catchAsync(async (req, res) => {
     query = query.populate({
       path: "guides",
       select: "name email role profileImage",
+    });
+  }
+
+  if (populateReviews) {
+    query = query.populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
     });
   }
 
@@ -428,6 +641,15 @@ export const getTopCheapTours = catchAsync(async (req, res) => {
       select: "name email role profileImage",
     });
   }
+
+  query = query.populate({
+    path: "reviews",
+    options: { limit: 2, sort: "-createdAt" },
+    populate: {
+      path: "user",
+      select: "name email profileImage",
+    },
+  });
 
   const tours = await query.lean();
 
@@ -462,6 +684,15 @@ export const getToursByDifficulty = catchAsync(async (req, res) => {
     });
   }
 
+  query = query.populate({
+    path: "reviews",
+    options: { limit: 3, sort: "-createdAt" },
+    populate: {
+      path: "user",
+      select: "name email profileImage",
+    },
+  });
+
   const tours = await query.lean();
 
   res.status(200).json({
@@ -489,6 +720,15 @@ export const getToursByRating = catchAsync(async (req, res) => {
       select: "name email role profileImage",
     });
   }
+
+  query = query.populate({
+    path: "reviews",
+    options: { limit: 3, sort: "-rating" },
+    populate: {
+      path: "user",
+      select: "name email profileImage",
+    },
+  });
 
   const tours = await query.lean();
 
@@ -518,6 +758,15 @@ export const getToursByDuration = catchAsync(async (req, res) => {
     });
   }
 
+  query = query.populate({
+    path: "reviews",
+    options: { limit: 3, sort: "-createdAt" },
+    populate: {
+      path: "user",
+      select: "name email profileImage",
+    },
+  });
+
   const tours = await query.lean();
 
   res.status(200).json({
@@ -537,6 +786,7 @@ export const searchTours = catchAsync(async (req, res) => {
     minRating,
     maxDuration,
     populateGuides = "true",
+    populateReviews = "true",
   } = req.query;
 
   const tours = await TourQueryService.advancedSearch({
@@ -551,14 +801,28 @@ export const searchTours = catchAsync(async (req, res) => {
 
   let populatedTours = tours;
 
-  if (populateGuides !== "false") {
+  if (populateGuides !== "false" || populateReviews !== "false") {
     const tourIds = tours.map((tour) => tour._id);
     let query = Tour.find({ _id: { $in: tourIds } });
 
-    query = populateGuideFields(query, {
-      populateGuides: true,
-      populateLeadGuide: true,
-    });
+    if (populateGuides !== "false") {
+      query = populateGuideFields(query, {
+        populateGuides: true,
+        populateLeadGuide: true,
+      });
+    }
+
+    if (populateReviews !== "false") {
+      query = query.populate({
+        path: "reviews",
+        options: { limit: 3, sort: "-createdAt" },
+        populate: {
+          path: "user",
+          select: "name email profileImage",
+        },
+      });
+    }
+
     populatedTours = await query.lean();
   }
 
@@ -722,6 +986,14 @@ export const assignGuide = catchAsync(async (req, res) => {
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
     })
+    .populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
+    })
     .lean();
 
   res.status(200).json({
@@ -765,9 +1037,7 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
   const existingGuideIds = tour.guides || [];
 
   for (const assignment of guideAssignments) {
-    // Skip if guide already assigned
     if (!existingGuideIds.includes(assignment.guideId)) {
-      // Check capacity
       const requirements = tour.guideDetails?.requirements || {};
       const maxGuides = requirements.maxGuides || 5;
 
@@ -779,7 +1049,6 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
     }
   }
 
-  // Add guides using Promise.all for parallel execution
   if (assignmentsToAdd.length > 0) {
     await Promise.all(
       assignmentsToAdd.map((assignment) =>
@@ -794,7 +1063,6 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
     await tour.save();
   }
 
-  // Update user assignments
   const guideIdsToAdd = guides.map((g) => g._id);
 
   await User.updateMany(
@@ -802,7 +1070,6 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
     { $addToSet: { assignedTours: tourId } },
   );
 
-  // Populate the updated tour
   const populatedTour = await Tour.findById(tourId)
     .populate({
       path: "guides",
@@ -815,6 +1082,14 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
     .populate({
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
+    })
+    .populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
     })
     .lean();
 
@@ -834,7 +1109,6 @@ export const removeGuide = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  // Check if guide is lead guide
   if (tour.guideDetails && tour.guideDetails.leadGuide) {
     if (tour.guideDetails.leadGuide.toString() === guideId) {
       throw new AppError(
@@ -844,14 +1118,11 @@ export const removeGuide = catchAsync(async (req, res) => {
     }
   }
 
-  // Remove guide using model method
   await tour.removeGuide(guideId);
   await tour.save();
 
-  // Remove from user's assigned tours
   await User.findByIdAndUpdate(guideId, { $pull: { assignedTours: tourId } });
 
-  // Populate the updated tour
   const populatedTour = await Tour.findById(tourId)
     .populate({
       path: "guides",
@@ -865,6 +1136,14 @@ export const removeGuide = catchAsync(async (req, res) => {
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
     })
+    .populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
+    })
     .lean();
 
   res.status(200).json({
@@ -877,6 +1156,7 @@ export const removeGuide = catchAsync(async (req, res) => {
 export const getAssignedTours = catchAsync(async (req, res) => {
   const populateGuides = req.query.populateGuides !== "false";
   const populateGuideDetails = req.query.populateGuideDetails === "true";
+  const populateReviews = req.query.populateReviews !== "false";
 
   let query = User.findById(req.user._id).populate({
     path: "assignedTours",
@@ -903,6 +1183,17 @@ export const getAssignedTours = catchAsync(async (req, res) => {
       });
   }
 
+  if (populateReviews) {
+    query = query.populate({
+      path: "assignedTours.reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
+    });
+  }
+
   const user = await query.lean();
 
   res.status(200).json({
@@ -911,8 +1202,6 @@ export const getAssignedTours = catchAsync(async (req, res) => {
     data: { tours: user.assignedTours },
   });
 });
-
-// ==================== GUIDE MANAGEMENT CONTROLLERS ====================
 
 export const setLeadGuide = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
@@ -928,16 +1217,13 @@ export const setLeadGuide = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  // Check if guide is assigned to tour
   if (!tour.isGuideAssigned(guideId)) {
     throw new AppError("Guide must be assigned to the tour first", 400);
   }
 
-  // Set lead guide
   await tour.setLeadGuide(guideId);
   await tour.save();
 
-  // Populate the updated tour
   const populatedTour = await Tour.findById(tourId)
     .populate({
       path: "guides",
@@ -950,6 +1236,14 @@ export const setLeadGuide = catchAsync(async (req, res) => {
     .populate({
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
+    })
+    .populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
     })
     .lean();
 
@@ -986,7 +1280,6 @@ export const getGuideDetails = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  // Get specific guide details
   const guideDetails = {
     guide: null,
     assignment: null,
@@ -994,7 +1287,6 @@ export const getGuideDetails = catchAsync(async (req, res) => {
     role: null,
   };
 
-  // Find guide in guides array
   if (tour.guides) {
     const guideIndex = tour.guides.findIndex(
       (g) => g._id.toString() === guideId,
@@ -1005,14 +1297,12 @@ export const getGuideDetails = catchAsync(async (req, res) => {
     }
   }
 
-  // Check if lead guide
   if (tour.guideDetails && tour.guideDetails.leadGuide) {
     if (tour.guideDetails.leadGuide._id.toString() === guideId) {
       guideDetails.role = "lead";
     }
   }
 
-  // Get assignment details
   if (tour.guideDetails && tour.guideDetails.guideAssignments) {
     const assignment = tour.guideDetails.guideAssignments.find(
       (a) => a.guideId._id.toString() === guideId,
@@ -1026,7 +1316,6 @@ export const getGuideDetails = catchAsync(async (req, res) => {
     }
   }
 
-  // Get rating details
   if (tour.guideRatings) {
     const ratings = tour.guideRatings.filter(
       (r) => r.guideId._id.toString() === guideId,
@@ -1069,12 +1358,10 @@ export const addGuideRating = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  // Check if guide is assigned
   if (!tour.isGuideAssigned(guideId)) {
     throw new AppError("Guide must be assigned to the tour", 400);
   }
 
-  // Check if user has already rated this guide
   const existingRating = tour.guideRatings?.find(
     (r) =>
       r.guideId.toString() === guideId &&
@@ -1086,7 +1373,6 @@ export const addGuideRating = catchAsync(async (req, res) => {
     throw new AppError("You have already rated this guide for this tour", 400);
   }
 
-  // Add rating
   tour.addGuideRating(
     guideId,
     rating,
@@ -1096,7 +1382,6 @@ export const addGuideRating = catchAsync(async (req, res) => {
   );
   await tour.save();
 
-  // Populate the updated tour
   const populatedTour = await Tour.findById(tourId)
     .populate({
       path: "guideRatings.guideId",
@@ -1105,6 +1390,14 @@ export const addGuideRating = catchAsync(async (req, res) => {
     .populate({
       path: "guideRatings.reviewerId",
       select: "name email",
+    })
+    .populate({
+      path: "reviews",
+      options: { limit: 3, sort: "-createdAt" },
+      populate: {
+        path: "user",
+        select: "name email profileImage",
+      },
     })
     .lean();
 
