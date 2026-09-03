@@ -2,6 +2,12 @@ import Review from "../models/Review.js";
 import Tour from "../models/Tour.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
+import {
+  deleteOne,
+  deleteMany,
+  restoreOne,
+  permanentDeleteOne,
+} from "../utils/factoryHandlers.js";
 
 const POPULATION_CONFIG = {
   user: {
@@ -138,7 +144,78 @@ const buildPopulationOptions = (parsedOptions, userRole = null) => {
   return options;
 };
 
-export const createReview = catchAsync(async (req, res) => {
+const deleteReview = deleteOne(Review, {
+  modelName: "Review",
+  softDelete: true,
+  idParam: "id",
+  beforeDelete: async (doc, req) => {
+    const isOwner = doc.user.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+    const isTourCreator = await Tour.exists({
+      _id: doc.tour,
+      createdBy: req.user._id,
+    });
+
+    if (!isOwner && !isAdmin && !isTourCreator) {
+      throw new AppError("You are not authorized to delete this review", 403);
+    }
+  },
+  afterDelete: async (doc) => {
+    await Review.calcAverageRatings(doc.tour);
+  },
+});
+
+const permanentDeleteReview = permanentDeleteOne(Review, {
+  modelName: "Review",
+  idParam: "id",
+  beforePermanentDelete: (doc, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can permanently delete reviews", 403);
+    }
+
+    return doc;
+  },
+  afterPermanentDelete: async (doc) => {
+    await Review.calcAverageRatings(doc.tour);
+  },
+});
+
+const restoreReview = restoreOne(Review, {
+  modelName: "Review",
+  idParam: "id",
+  beforeRestore: (doc, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can restore reviews", 403);
+    }
+
+    return doc;
+  },
+  afterRestore: async (doc) => {
+    await Review.calcAverageRatings(doc.tour);
+  },
+});
+
+const bulkDeleteReviews = deleteMany(Review, {
+  modelName: "Review",
+  softDelete: true,
+  maxDeleteLimit: 50,
+  beforeBulkDelete: (docs, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can bulk delete reviews", 403);
+    }
+
+    return docs;
+  },
+  afterBulkDelete: async (docs) => {
+    const tourIds = [...new Set(docs.map((doc) => doc.tour.toString()))];
+
+    await Promise.all(
+      tourIds.map((tourId) => Review.calcAverageRatings(tourId)),
+    );
+  },
+});
+
+const createReview = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.body.tourId;
   const { review, rating, title, isRecommended } = req.body;
 
@@ -215,7 +292,10 @@ export const createReview = catchAsync(async (req, res) => {
   });
 });
 
-export const getAllReviews = catchAsync(async (req, res) => {
+/**
+ * Get all reviews
+ */
+const getAllReviews = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.query.tourId;
   const {
     page = 1,
@@ -257,6 +337,7 @@ export const getAllReviews = catchAsync(async (req, res) => {
   if (minRating) {
     reviewQuery = reviewQuery.where("rating").gte(parseFloat(minRating));
   }
+
   if (maxRating) {
     reviewQuery = reviewQuery.where("rating").lte(parseFloat(maxRating));
   }
@@ -306,6 +387,7 @@ export const getAllReviews = catchAsync(async (req, res) => {
   if (!req.user || req.user.role !== "admin") {
     countQuery = countQuery.where("status").equals("approved");
   }
+
   const total = await countQuery.countDocuments();
 
   res.status(200).json({
@@ -318,7 +400,10 @@ export const getAllReviews = catchAsync(async (req, res) => {
   });
 });
 
-export const getReview = catchAsync(async (req, res) => {
+/**
+ * Get a single review
+ */
+const getReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const {
     populateAll = "true",
@@ -379,7 +464,10 @@ export const getReview = catchAsync(async (req, res) => {
   });
 });
 
-export const updateReview = catchAsync(async (req, res) => {
+/**
+ * Update a review
+ */
+const updateReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { review, rating, title, isRecommended } = req.body;
 
@@ -410,6 +498,7 @@ export const updateReview = catchAsync(async (req, res) => {
   if (!existingReview.editHistory) {
     existingReview.editHistory = [];
   }
+
   existingReview.editHistory.push({
     review: existingReview.review,
     rating: existingReview.rating,
@@ -447,42 +536,10 @@ export const updateReview = catchAsync(async (req, res) => {
   });
 });
 
-export const deleteReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-
-  const review = await Review.findById(id);
-
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
-
-  const isOwner = review.user.toString() === req.user._id.toString();
-  const isAdmin = req.user.role === "admin";
-  const isTourCreator = await Tour.exists({
-    _id: review.tour,
-    createdBy: req.user._id,
-  });
-
-  if (!isOwner && !isAdmin && !isTourCreator) {
-    throw new AppError("You are not authorized to delete this review", 403);
-  }
-
-  if (req.query.hard === "true" && isAdmin) {
-    await Review.findByIdAndDelete(id);
-  } else {
-    review.status = "rejected";
-    await review.save();
-  }
-
-  await Review.calcAverageRatings(review.tour);
-
-  res.status(204).json({
-    status: "success",
-    data: null,
-  });
-});
-
-export const markHelpful = catchAsync(async (req, res) => {
+/**
+ * Mark review as helpful
+ */
+const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
 
   const review = await Review.findById(id);
@@ -512,7 +569,10 @@ export const markHelpful = catchAsync(async (req, res) => {
   });
 });
 
-export const addReviewResponse = catchAsync(async (req, res) => {
+/**
+ * Add response to review
+ */
+const addReviewResponse = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
 
@@ -555,7 +615,10 @@ export const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
-export const approveReview = catchAsync(async (req, res) => {
+/**
+ * Approve review (admin only)
+ */
+const approveReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
   const review = await Review.findById(id);
@@ -584,7 +647,10 @@ export const approveReview = catchAsync(async (req, res) => {
   });
 });
 
-export const rejectReview = catchAsync(async (req, res) => {
+/**
+ * Reject review (admin only)
+ */
+const rejectReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
   const review = await Review.findById(id);
@@ -605,7 +671,10 @@ export const rejectReview = catchAsync(async (req, res) => {
   });
 });
 
-export const flagReview = catchAsync(async (req, res) => {
+/**
+ * Flag review
+ */
+const flagReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { reason, description } = req.body;
 
@@ -642,7 +711,10 @@ export const flagReview = catchAsync(async (req, res) => {
   });
 });
 
-export const getReviewStats = catchAsync(async (req, res) => {
+/**
+ * Get review statistics
+ */
+const getReviewStats = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
 
   if (!tourId) {
@@ -697,7 +769,10 @@ export const getReviewStats = catchAsync(async (req, res) => {
   });
 });
 
-export const getTourReviews = catchAsync(async (req, res) => {
+/**
+ * Get tour reviews (public)
+ */
+const getTourReviews = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
   const {
     page = 1,
@@ -729,9 +804,11 @@ export const getTourReviews = catchAsync(async (req, res) => {
   if (minRating) {
     query = query.where("rating").gte(parseFloat(minRating));
   }
+
   if (maxRating) {
     query = query.where("rating").lte(parseFloat(maxRating));
   }
+
   if (helpful === "true") {
     query = query.where("helpfulCount").gte(1);
   }
@@ -785,7 +862,10 @@ export const getTourReviews = catchAsync(async (req, res) => {
   });
 });
 
-export const getMyReviews = catchAsync(async (req, res) => {
+/**
+ * Get my reviews
+ */
+const getMyReviews = catchAsync(async (req, res) => {
   const {
     page = 1,
     limit = 10,
@@ -839,7 +919,10 @@ export const getMyReviews = catchAsync(async (req, res) => {
   });
 });
 
-export const getBatchTourReviews = catchAsync(async (req, res) => {
+/**
+ * Get batch tour reviews
+ */
+const getBatchTourReviews = catchAsync(async (req, res) => {
   const { tourIds } = req.body;
   const {
     limit = 5,
@@ -894,3 +977,23 @@ export const getBatchTourReviews = catchAsync(async (req, res) => {
     data: { reviewsByTour },
   });
 });
+
+export {
+  deleteReview,
+  permanentDeleteReview,
+  restoreReview,
+  bulkDeleteReviews,
+  createReview,
+  getAllReviews,
+  getReview,
+  updateReview,
+  markHelpful,
+  addReviewResponse,
+  approveReview,
+  rejectReview,
+  flagReview,
+  getReviewStats,
+  getTourReviews,
+  getMyReviews,
+  getBatchTourReviews,
+};
