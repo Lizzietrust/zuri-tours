@@ -40,7 +40,6 @@ const populateReviewFields = (query, populateOptions = {}) => {
     populateEditHistory = false,
     populateAttachments = false,
     populateAll = false,
-
     customPopulations = [],
   } = populateOptions;
 
@@ -86,40 +85,6 @@ const populateReviewFields = (query, populateOptions = {}) => {
 
   return populatedQuery;
 };
-
-// const parsePopulationOptions = (query) => {
-//   const {
-//     populateUser = "true",
-//     populateTour = "true",
-//     populateResponseUser = "false",
-//     populateFlagUsers = "false",
-//     populateEditHistory = "false",
-//     populateAttachments = "false",
-//     populateAll = "false",
-//     // Custom field selections
-//     userFields = "name email profileImage role",
-//     tourFields = "name slug price duration difficulty imageCover",
-//     responseUserFields = "name email role profileImage",
-//     flagUserFields = "name email role",
-//     editHistoryFields = "name email role",
-//   } = query;
-
-//   return {
-//     populateUser: populateUser === "true",
-//     populateTour: populateTour === "true",
-//     populateResponseUser: populateResponseUser === "true",
-//     populateFlagUsers: populateFlagUsers === "true",
-//     populateEditHistory: populateEditHistory === "true",
-//     populateAttachments: populateAttachments === "true",
-//     populateAll: populateAll === "true",
-//     // Custom field selections
-//     userFields,
-//     tourFields,
-//     responseUserFields,
-//     flagUserFields,
-//     editHistoryFields,
-//   };
-// };
 
 const buildPopulationOptions = (parsedOptions, userRole = null) => {
   const options = {
@@ -174,7 +139,7 @@ const buildPopulationOptions = (parsedOptions, userRole = null) => {
 };
 
 export const createReview = catchAsync(async (req, res) => {
-  const { tourId } = req.params;
+  const tourId = req.params.tourId || req.params.id || req.body.tourId;
   const { review, rating, title, isRecommended } = req.body;
 
   if (!review || !rating) {
@@ -216,7 +181,6 @@ export const createReview = catchAsync(async (req, res) => {
     user: req.user._id,
     isVerifiedPurchase,
     isRecommended: isRecommended !== undefined ? isRecommended : true,
-
     metadata: {
       userAgent: req.headers["user-agent"],
       ipAddress: req.ip || req.connection.remoteAddress,
@@ -252,7 +216,7 @@ export const createReview = catchAsync(async (req, res) => {
 });
 
 export const getAllReviews = catchAsync(async (req, res) => {
-  const { tourId } = req.params;
+  const tourId = req.params.tourId || req.query.tourId;
   const {
     page = 1,
     limit = 10,
@@ -260,37 +224,41 @@ export const getAllReviews = catchAsync(async (req, res) => {
     status = "approved",
     minRating,
     maxRating,
-
     populateAll = "false",
     populateUser = "true",
     populateTour = "true",
     populateResponseUser = "false",
     populateAttachments = "false",
-
     userFields,
     tourFields,
     responseUserFields,
   } = req.query;
 
-  let query = Review.find({ tour: tourId });
+  const query = {};
+
+  if (tourId) {
+    query.tour = tourId;
+  }
+
+  let reviewQuery = Review.find(query);
 
   if (status) {
     if (req.user && req.user.role === "admin") {
       if (status !== "all") {
-        query = query.where("status").equals(status);
+        reviewQuery = reviewQuery.where("status").equals(status);
       }
     } else {
-      query = query.where("status").equals("approved");
+      reviewQuery = reviewQuery.where("status").equals("approved");
     }
   } else if (!req.user || req.user.role !== "admin") {
-    query = query.where("status").equals("approved");
+    reviewQuery = reviewQuery.where("status").equals("approved");
   }
 
   if (minRating) {
-    query = query.where("rating").gte(parseFloat(minRating));
+    reviewQuery = reviewQuery.where("rating").gte(parseFloat(minRating));
   }
   if (maxRating) {
-    query = query.where("rating").lte(parseFloat(maxRating));
+    reviewQuery = reviewQuery.where("rating").lte(parseFloat(maxRating));
   }
 
   const sortOptions = {
@@ -306,13 +274,13 @@ export const getAllReviews = catchAsync(async (req, res) => {
     isRecommended: { isRecommended: 1 },
   };
 
-  query = query.sort(sortOptions[sort] || { createdAt: -1 });
+  reviewQuery = reviewQuery.sort(sortOptions[sort] || { createdAt: -1 });
 
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
   const skip = (pageNum - 1) * limitNum;
 
-  query = query.skip(skip).limit(limitNum);
+  reviewQuery = reviewQuery.skip(skip).limit(limitNum);
 
   const parsedOptions = {
     populateAll,
@@ -329,11 +297,11 @@ export const getAllReviews = catchAsync(async (req, res) => {
 
   const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
 
-  query = populateReviewFields(query, popOptions);
+  reviewQuery = populateReviewFields(reviewQuery, popOptions);
 
-  const reviews = await query.lean();
+  const reviews = await reviewQuery.lean();
 
-  let countQuery = Review.find({ tour: tourId });
+  let countQuery = Review.find(query);
 
   if (!req.user || req.user.role !== "admin") {
     countQuery = countQuery.where("status").equals("approved");
@@ -675,7 +643,11 @@ export const flagReview = catchAsync(async (req, res) => {
 });
 
 export const getReviewStats = catchAsync(async (req, res) => {
-  const { tourId } = req.params;
+  const tourId = req.params.tourId || req.params.id || req.query.tourId;
+
+  if (!tourId) {
+    throw new AppError("Tour ID is required", 400);
+  }
 
   const tour = await Tour.findById(tourId);
 
@@ -725,66 +697,8 @@ export const getReviewStats = catchAsync(async (req, res) => {
   });
 });
 
-// Get user's reviews
-export const getMyReviews = catchAsync(async (req, res) => {
-  const {
-    page = 1,
-    limit = 10,
-    sort = "-createdAt",
-    status,
-    populateAll = "false",
-    populateTour = "true",
-    populateResponseUser = "true",
-    populateAttachments = "false",
-    tourFields,
-  } = req.query;
-
-  let query = Review.find({ user: req.user._id });
-
-  if (status) {
-    query = query.where("status").equals(status);
-  }
-
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
-
-  query = query.sort(sort).skip(skip).limit(limitNum);
-
-  // Parse and apply population options
-  const parsedOptions = {
-    populateAll,
-    populateUser: "false",
-    populateTour,
-    populateResponseUser,
-    populateAttachments,
-    populateFlagUsers: "false",
-    populateEditHistory: "false",
-    tourFields,
-  };
-
-  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
-
-  query = populateReviewFields(query, popOptions);
-
-  const reviews = await query.lean();
-
-  const total = await Review.countDocuments({ user: req.user._id });
-
-  res.status(200).json({
-    status: "success",
-    results: reviews.length,
-    total,
-    page: pageNum,
-    pages: Math.ceil(total / limitNum),
-    data: { reviews },
-  });
-});
-
-// ==================== GET REVIEWS BY TOUR (PUBLIC) ====================
-
 export const getTourReviews = catchAsync(async (req, res) => {
-  const { tourId } = req.params;
+  const tourId = req.params.tourId || req.params.id || req.query.tourId;
   const {
     page = 1,
     limit = 10,
@@ -792,20 +706,21 @@ export const getTourReviews = catchAsync(async (req, res) => {
     minRating,
     maxRating,
     helpful,
-    // Population options
     populateUser = "true",
     populateAll = "false",
     userFields,
   } = req.query;
 
-  // Check if tour exists
+  if (!tourId) {
+    throw new AppError("Tour ID is required", 400);
+  }
+
   const tour = await Tour.findById(tourId);
 
   if (!tour) {
     throw new AppError("Tour not found", 404);
   }
 
-  // Build query
   let query = Review.find({
     tour: tourId,
     status: "approved",
@@ -838,7 +753,6 @@ export const getTourReviews = catchAsync(async (req, res) => {
 
   query = query.skip(skip).limit(limitNum);
 
-  // Apply population
   const parsedOptions = {
     populateAll,
     populateUser,
@@ -871,9 +785,60 @@ export const getTourReviews = catchAsync(async (req, res) => {
   });
 });
 
-// ==================== BULK REVIEW OPERATIONS ====================
+export const getMyReviews = catchAsync(async (req, res) => {
+  const {
+    page = 1,
+    limit = 10,
+    sort = "-createdAt",
+    status,
+    populateAll = "false",
+    populateTour = "true",
+    populateResponseUser = "true",
+    populateAttachments = "false",
+    tourFields,
+  } = req.query;
 
-// Get reviews for multiple tours (batch)
+  let query = Review.find({ user: req.user._id });
+
+  if (status) {
+    query = query.where("status").equals(status);
+  }
+
+  const pageNum = parseInt(page, 10);
+  const limitNum = parseInt(limit, 10);
+  const skip = (pageNum - 1) * limitNum;
+
+  query = query.sort(sort).skip(skip).limit(limitNum);
+
+  const parsedOptions = {
+    populateAll,
+    populateUser: "false",
+    populateTour,
+    populateResponseUser,
+    populateAttachments,
+    populateFlagUsers: "false",
+    populateEditHistory: "false",
+    tourFields,
+  };
+
+  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
+
+  query = populateReviewFields(query, popOptions);
+
+  const reviews = await query.lean();
+
+  const total = await Review.countDocuments({ user: req.user._id });
+
+  res.status(200).json({
+    status: "success",
+    results: reviews.length,
+    total,
+    page: pageNum,
+    pages: Math.ceil(total / limitNum),
+    data: { reviews },
+  });
+});
+
 export const getBatchTourReviews = catchAsync(async (req, res) => {
   const { tourIds } = req.body;
   const {
@@ -887,14 +852,12 @@ export const getBatchTourReviews = catchAsync(async (req, res) => {
     throw new AppError("Please provide an array of tour IDs", 400);
   }
 
-  // Validate tours exist
   const tours = await Tour.find({ _id: { $in: tourIds } });
 
   if (tours.length !== tourIds.length) {
     throw new AppError("Some tours not found", 404);
   }
 
-  // Get reviews for all tours
   const reviewsByTour = await Promise.all(
     tourIds.map(async (tourId) => {
       const query = Review.find({
