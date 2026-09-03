@@ -5,6 +5,9 @@ import {
   getReview,
   updateReview,
   deleteReview,
+  permanentDeleteReview,
+  restoreReview,
+  bulkDeleteReviews,
   markHelpful,
   addReviewResponse,
   approveReview,
@@ -32,15 +35,14 @@ router
   .get(getAllReviews)
   .post(protect, reviewCreationLimiter, validateReview, createReview);
 
-router.route("/stats").get(getReviewStats);
-
-router.route("/public").get(getTourReviews);
-
 router
   .route("/:id")
   .get(getReview)
   .patch(protect, checkValidId, userUpdateLimiter, validateReview, updateReview)
   .delete(protect, checkValidId, deleteReview);
+
+router.route("/stats").get(getReviewStats);
+router.route("/public").get(getTourReviews);
 
 router
   .route("/:id/helpful")
@@ -73,6 +75,18 @@ router
 router
   .route("/:id/flag")
   .post(protect, checkValidId, userUpdateLimiter, flagReview);
+
+router
+  .route("/:id/permanent")
+  .delete(protect, authorize("admin"), checkValidId, permanentDeleteReview);
+
+router
+  .route("/:id/restore")
+  .patch(protect, authorize("admin"), checkValidId, restoreReview);
+
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteReviews);
 
 router.route("/my-reviews").get(protect, getMyReviews);
 
