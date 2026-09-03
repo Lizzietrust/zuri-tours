@@ -1,8 +1,16 @@
 import Tour from "../models/Tour.js";
 import User from "../models/User.js";
+import Review from "../models/Review.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
 import TourQueryService from "../services/tourQueryService.js";
+import {
+  deleteOne,
+  deleteMany,
+  restoreOne,
+  permanentDeleteOne,
+  cascadeDeleteOne,
+} from "../utils/handlerFactory.js";
 
 const populateGuideFields = (query, populateOptions = {}) => {
   const {
@@ -164,7 +172,79 @@ const populateReviewVirtuals = (query, options = {}) => {
   return populatedQuery;
 };
 
-export const getAllTours = catchAsync(async (req, res) => {
+const deleteTour = cascadeDeleteOne(Tour, {
+  modelName: "Tour",
+  idParam: "id",
+  cascadeModels: [
+    {
+      model: Review,
+      foreignField: "tour",
+      modelName: "Reviews",
+    },
+  ],
+  beforeCascadeDelete: async (doc) => {
+    if (doc.guides && doc.guides.length > 0) {
+      await User.updateMany(
+        { assignedTours: doc._id },
+        { $pull: { assignedTours: doc._id } },
+      );
+    }
+  },
+
+  afterCascadeDelete: (doc, cascadeResults) => {
+    console.log(
+      `Tour ${doc._id} deleted with ${cascadeResults.Reviews?.deletedCount || 0} reviews`,
+    );
+  },
+});
+
+const softDeleteTour = deleteOne(Tour, {
+  modelName: "Tour",
+  softDelete: true,
+  idParam: "id",
+  beforeDelete: async (doc) => {
+    if (doc.guides && doc.guides.length > 0) {
+      await User.updateMany(
+        { assignedTours: doc._id },
+        { $pull: { assignedTours: doc._id } },
+      );
+    }
+  },
+});
+
+const restoreTour = restoreOne(Tour, {
+  modelName: "Tour",
+  idParam: "id",
+  afterRestore: async (doc) => {
+    if (doc.guides && doc.guides.length > 0) {
+      await User.updateMany(
+        { _id: { $in: doc.guides } },
+        { $addToSet: { assignedTours: doc._id } },
+      );
+    }
+  },
+});
+
+const permanentDeleteTour = permanentDeleteOne(Tour, {
+  modelName: "Tour",
+  idParam: "id",
+});
+
+const bulkDeleteTours = deleteMany(Tour, {
+  modelName: "Tour",
+  softDelete: false,
+  maxDeleteLimit: 50,
+  beforeBulkDelete: async (docs) => {
+    const tourIds = docs.map((doc) => doc._id);
+
+    await User.updateMany(
+      { assignedTours: { $in: tourIds } },
+      { $pull: { assignedTours: { $in: tourIds } } },
+    );
+  },
+});
+
+const getAllTours = catchAsync(async (req, res) => {
   const { tours, pagination, count } =
     await TourQueryService.executePaginatedQuery(req.query);
 
@@ -213,7 +293,10 @@ export const getAllTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getTour = catchAsync(async (req, res) => {
+/**
+ * Get a single tour by ID or slug
+ */
+const getTour = catchAsync(async (req, res) => {
   const { id } = req.params;
   const isMongoId = id.match(/^[0-9a-fA-F]{24}$/);
 
@@ -293,7 +376,10 @@ export const getTour = catchAsync(async (req, res) => {
   });
 });
 
-export const createTour = catchAsync(async (req, res) => {
+/**
+ * Create a new tour
+ */
+const createTour = catchAsync(async (req, res) => {
   const tourData = {
     ...req.body,
     createdBy: req.user._id,
@@ -348,7 +434,6 @@ export const createTour = catchAsync(async (req, res) => {
       path: "guideDetails.assistantGuides",
       select: "name email role profileImage bio",
     })
-
     .populate({
       path: "reviews",
       options: { limit: 5, sort: "-createdAt" },
@@ -365,7 +450,10 @@ export const createTour = catchAsync(async (req, res) => {
   });
 });
 
-export const updateTour = catchAsync(async (req, res) => {
+/**
+ * Update a tour
+ */
+const updateTour = catchAsync(async (req, res) => {
   const { id } = req.params;
   const updateData = { ...req.body };
 
@@ -446,7 +534,6 @@ export const updateTour = catchAsync(async (req, res) => {
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
     })
-
     .populate({
       path: "reviews",
       options: { limit: 5, sort: "-createdAt" },
@@ -463,29 +550,7 @@ export const updateTour = catchAsync(async (req, res) => {
   });
 });
 
-export const deleteTour = catchAsync(async (req, res) => {
-  const tour = await Tour.findById(req.params.id);
-
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
-
-  if (tour.guides && tour.guides.length > 0) {
-    await User.updateMany(
-      { assignedTours: tour._id },
-      { $pull: { assignedTours: tour._id } },
-    );
-  }
-
-  await Tour.findByIdAndDelete(req.params.id);
-
-  res.status(204).json({
-    status: "success",
-    data: null,
-  });
-});
-
-export const getTourWithReviews = catchAsync(async (req, res) => {
+const getTourWithReviews = catchAsync(async (req, res) => {
   const { id } = req.params;
   const {
     reviewPage = 1,
@@ -521,9 +586,9 @@ export const getTourWithReviews = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  const Review = (await import("../models/Review.js")).default;
+  const ReviewModel = (await import("../models/Review.js")).default;
 
-  const reviewQuery = Review.find({
+  const reviewQuery = ReviewModel.find({
     tour: tour._id,
     status: "approved",
   });
@@ -545,14 +610,14 @@ export const getTourWithReviews = catchAsync(async (req, res) => {
   });
 
   const reviews = await reviewQuery.lean();
-  const totalReviews = await Review.countDocuments({
+  const totalReviews = await ReviewModel.countDocuments({
     tour: tour._id,
     status: "approved",
   });
 
-  const stats = await Review.getReviewStats(tour._id);
+  const stats = await ReviewModel.getReviewStats(tour._id);
 
-  const distribution = await Review.getRatingDistribution(tour._id);
+  const distribution = await ReviewModel.getRatingDistribution(tour._id);
 
   res.status(200).json({
     status: "success",
@@ -587,7 +652,10 @@ export const getTourWithReviews = catchAsync(async (req, res) => {
   });
 });
 
-export const getToursByPriceRange = catchAsync(async (req, res) => {
+/**
+ * Get tours by price range
+ */
+const getToursByPriceRange = catchAsync(async (req, res) => {
   const minPrice = parseInt(req.query.min, 10) || 0;
   const maxPrice = parseInt(req.query.max, 10) || 10000;
   const populateGuides = req.query.populateGuides !== "false";
@@ -626,7 +694,10 @@ export const getToursByPriceRange = catchAsync(async (req, res) => {
   });
 });
 
-export const getTopCheapTours = catchAsync(async (req, res) => {
+/**
+ * Get top cheap tours
+ */
+const getTopCheapTours = catchAsync(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 5;
   const populateGuides = req.query.populateGuides !== "false";
 
@@ -660,7 +731,10 @@ export const getTopCheapTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getToursByDifficulty = catchAsync(async (req, res) => {
+/**
+ * Get tours by difficulty
+ */
+const getToursByDifficulty = catchAsync(async (req, res) => {
   const { level } = req.params;
   const validLevels = ["easy", "medium", "difficult"];
 
@@ -702,7 +776,10 @@ export const getToursByDifficulty = catchAsync(async (req, res) => {
   });
 });
 
-export const getToursByRating = catchAsync(async (req, res) => {
+/**
+ * Get tours by rating
+ */
+const getToursByRating = catchAsync(async (req, res) => {
   const minRating = parseFloat(req.query.minRating) || 4.5;
   const limit = parseInt(req.query.limit, 10) || 10;
   const populateGuides = req.query.populateGuides !== "false";
@@ -739,7 +816,10 @@ export const getToursByRating = catchAsync(async (req, res) => {
   });
 });
 
-export const getToursByDuration = catchAsync(async (req, res) => {
+/**
+ * Get tours by duration
+ */
+const getToursByDuration = catchAsync(async (req, res) => {
   const maxDuration = parseInt(req.query.maxDuration, 10) || 7;
   const limit = parseInt(req.query.limit, 10) || 10;
   const populateGuides = req.query.populateGuides !== "false";
@@ -776,7 +856,10 @@ export const getToursByDuration = catchAsync(async (req, res) => {
   });
 });
 
-export const searchTours = catchAsync(async (req, res) => {
+/**
+ * Search tours
+ */
+const searchTours = catchAsync(async (req, res) => {
   const {
     q,
     location,
@@ -833,7 +916,10 @@ export const searchTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getTourStats = catchAsync(async (req, res) => {
+/**
+ * Get tour statistics
+ */
+const getTourStats = catchAsync(async (req, res) => {
   const [stats, overallStats] = await Promise.all([
     Tour.aggregate([
       {
@@ -886,7 +972,10 @@ export const getTourStats = catchAsync(async (req, res) => {
   });
 });
 
-export const getMonthlyPlan = catchAsync(async (req, res) => {
+/**
+ * Get monthly plan
+ */
+const getMonthlyPlan = catchAsync(async (req, res) => {
   const year = parseInt(req.params.year, 10) || new Date().getFullYear();
 
   const plan = await Tour.aggregate([
@@ -934,7 +1023,7 @@ export const getMonthlyPlan = catchAsync(async (req, res) => {
   });
 });
 
-export const assignGuide = catchAsync(async (req, res) => {
+const assignGuide = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideId, role = "assistant", startDate, endDate } = req.body;
 
@@ -1003,7 +1092,10 @@ export const assignGuide = catchAsync(async (req, res) => {
   });
 });
 
-export const assignMultipleGuides = catchAsync(async (req, res) => {
+/**
+ * Assign multiple guides to a tour
+ */
+const assignMultipleGuides = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideAssignments } = req.body;
 
@@ -1100,7 +1192,10 @@ export const assignMultipleGuides = catchAsync(async (req, res) => {
   });
 });
 
-export const removeGuide = catchAsync(async (req, res) => {
+/**
+ * Remove a guide from a tour
+ */
+const removeGuide = catchAsync(async (req, res) => {
   const { id: tourId, guideId } = req.params;
 
   const tour = await Tour.findById(tourId);
@@ -1153,7 +1248,10 @@ export const removeGuide = catchAsync(async (req, res) => {
   });
 });
 
-export const getAssignedTours = catchAsync(async (req, res) => {
+/**
+ * Get assigned tours for a user
+ */
+const getAssignedTours = catchAsync(async (req, res) => {
   const populateGuides = req.query.populateGuides !== "false";
   const populateGuideDetails = req.query.populateGuideDetails === "true";
   const populateReviews = req.query.populateReviews !== "false";
@@ -1203,7 +1301,10 @@ export const getAssignedTours = catchAsync(async (req, res) => {
   });
 });
 
-export const setLeadGuide = catchAsync(async (req, res) => {
+/**
+ * Set lead guide
+ */
+const setLeadGuide = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideId } = req.body;
 
@@ -1254,7 +1355,10 @@ export const setLeadGuide = catchAsync(async (req, res) => {
   });
 });
 
-export const getGuideDetails = catchAsync(async (req, res) => {
+/**
+ * Get guide details
+ */
+const getGuideDetails = catchAsync(async (req, res) => {
   const { id: tourId, guideId } = req.params;
 
   const tour = await Tour.findById(tourId)
@@ -1340,7 +1444,10 @@ export const getGuideDetails = catchAsync(async (req, res) => {
   });
 });
 
-export const addGuideRating = catchAsync(async (req, res) => {
+/**
+ * Add guide rating
+ */
+const addGuideRating = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideId, rating, review, categories } = req.body;
 
@@ -1407,3 +1514,31 @@ export const addGuideRating = catchAsync(async (req, res) => {
     data: { tour: populatedTour },
   });
 });
+
+export {
+  deleteTour,
+  softDeleteTour,
+  restoreTour,
+  permanentDeleteTour,
+  bulkDeleteTours,
+  getAllTours,
+  getTour,
+  createTour,
+  updateTour,
+  getTourWithReviews,
+  getToursByPriceRange,
+  getTopCheapTours,
+  getToursByDifficulty,
+  getToursByRating,
+  getToursByDuration,
+  searchTours,
+  getTourStats,
+  getMonthlyPlan,
+  assignGuide,
+  assignMultipleGuides,
+  removeGuide,
+  getAssignedTours,
+  setLeadGuide,
+  getGuideDetails,
+  addGuideRating,
+};
