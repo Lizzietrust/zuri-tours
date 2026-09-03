@@ -5,6 +5,9 @@ import {
   getUser,
   updateUser,
   deleteUser,
+  permanentDeleteUser,
+  restoreUser,
+  bulkDeleteUsers,
   updateUserRole,
   getUsersByRole,
   getUserTours,
@@ -13,7 +16,6 @@ import {
   getUsersWithStats,
   searchUsers,
   bulkUpdateUsers,
-  bulkDeleteUsers,
 } from "../controllers/userController.js";
 import {
   checkValidId,
@@ -40,9 +42,7 @@ router.route("/search").get(protect, authorize("admin"), searchUsers);
 router.use(protect);
 
 router.route("/:userId/tours").get(checkValidId, getUserTours);
-
 router.route("/:userId/reviews").get(checkValidId, getUserReviews);
-
 router.route("/:userId/stats").get(checkValidId, getUserStats);
 
 router
@@ -51,10 +51,21 @@ router
   .patch(checkValidId, userUpdateLimiter, validateUser, updateUser)
   .delete(checkValidId, deleteUser);
 
+router
+  .route("/:id/restore")
+  .patch(protect, authorize("admin"), checkValidId, restoreUser);
+
+router
+  .route("/:id/permanent")
+  .delete(protect, authorize("admin"), checkValidId, permanentDeleteUser);
+
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteUsers);
+
 router.use(authorize("admin"));
 
 router.route("/bulk/update").patch(bulkUpdateUsers);
-router.route("/bulk/delete").delete(bulkDeleteUsers);
 
 router.route("/stats/all").get(getUsersWithStats);
 
