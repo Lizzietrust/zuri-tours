@@ -3,33 +3,56 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
-import mongoSanitize from "express-mongo-sanitize"; // eslint-disable-line import/no-extraneous-dependencies
-import xss from "xss-clean"; // eslint-disable-line import/no-extraneous-dependencies
-import hpp from "hpp"; // eslint-disable-line import/no-extraneous-dependencies
-import tourRouter from "./routes/tourRoutes.js";
-import userRouter from "./routes/userRoutes.js";
-import authRouter from "./routes/authRoutes.js";
-import guideRouter from "./routes/guideRoutes.js";
-import emailRouter from "./routes/emailRoutes.js";
-import connectDB from "./config/db.js";
-import { errorHandler, notFound } from "./middleware/errorHandler.js";
-import { apiLimiter } from "./middleware/rateLimitMiddleware.js";
-import { securityHeaders } from "./middleware/securityHeaders.js";
+import morgan from "morgan";
+import compression from "compression";
+import mongoSanitize from "express-mongo-sanitize";
+import xss from "xss-clean";
+import hpp from "hpp";
+
+import tourRouter from "../routes/tourRoutes.js";
+import reviewRouter from "../routes/reviewRoutes.js";
+import userRouter from "../routes/userRoutes.js";
+import authRouter from "../routes/authRoutes.js";
+
+import {
+  generalLimiter,
+  apiLimiter,
+} from "../middleware/rateLimitMiddleware.js";
+import { securityHeaders } from "../middleware/securityHeaders.js";
+// import { errorHandler, notFound } from "../middleware/errorHandler.js";
+import { AppError } from "../utils/appError.js";
 
 dotenv.config();
 
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI =
+  process.env.MONGODB_URI || "mongodb://localhost:27017/tourDB";
+const NODE_ENV = process.env.NODE_ENV || "development";
+const API_VERSION = "/api/v1";
+
 console.log("📋 Environment Configuration:");
-console.log(`   NODE_ENV: ${process.env.NODE_ENV || "development"}`);
-console.log(`   PORT: ${process.env.PORT || 5000}`);
-console.log(`   MONGO_URI: ${process.env.MONGO_URI ? "✅ Set" : "❌ Not Set"}`);
+console.log(`   NODE_ENV: ${NODE_ENV}`);
+console.log(`   PORT: ${PORT}`);
+console.log(`   MONGO_URI: ${MONGODB_URI ? "✅ Set" : "❌ Not Set"}`);
 console.log(
-  `   EMAIL_HOST: ${process.env.EMAIL_HOST ? "✅ Set" : "❌ Not Set"}`,
-);
-console.log(
-  `   EMAIL_USERNAME: ${process.env.EMAIL_USERNAME ? "✅ Set" : "❌ Not Set"}`,
+  `   CLIENT_URL: ${process.env.CLIENT_URL ? "✅ Set" : "❌ Not Set"}`,
 );
 
-connectDB();
+mongoose
+  .connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
+    console.log(`   Host: ${mongoose.connection.host}`);
+    console.log(`   Port: ${mongoose.connection.port}`);
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err.message);
+    console.error("   Please check your MongoDB connection string");
+    process.exit(1);
+  });
 
 const app = express();
 
@@ -80,7 +103,7 @@ const corsOptions = {
   maxAge: 86400,
 };
 
-if (process.env.NODE_ENV === "production") {
+if (NODE_ENV === "production") {
   corsOptions.origin = process.env.CLIENT_URL || false;
 }
 
@@ -89,7 +112,16 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+app.use(compression());
+
+if (NODE_ENV === "development") {
+  app.use(morgan("dev"));
+} else {
+  app.use(morgan("combined"));
+}
+
 app.use(xss());
+
 app.use(mongoSanitize());
 
 app.use(
@@ -102,26 +134,30 @@ app.use(
       "price",
       "rating",
       "duration",
+      "difficulty",
+      "category",
     ],
   }),
 );
 
-app.use("/api", apiLimiter);
+app.use("/api", apiLimiter || generalLimiter);
 
-if (process.env.NODE_ENV !== "production") {
+if (NODE_ENV !== "production") {
   app.use((req, res, next) => {
     console.log(`📝 ${req.method} ${req.url}`);
     next();
   });
 }
 
-app.use("/api/v1/auth", authRouter);
-app.use("/api/v1/users", userRouter);
-app.use("/api/v1/tours", tourRouter);
-app.use("/api/v1/guides", guideRouter);
-app.use("/api/v1/email", emailRouter);
+app.use(`${API_VERSION}/auth`, authRouter);
 
-app.get("/api/health", (req, res) => {
+app.use(`${API_VERSION}/tours`, tourRouter);
+
+app.use(`${API_VERSION}/reviews`, reviewRouter);
+
+app.use(`${API_VERSION}/users`, userRouter);
+
+app.get("/health", (req, res) => {
   const dbStatus = mongoose.connection.readyState;
   const dbStatusMap = {
     0: "disconnected",
@@ -130,8 +166,9 @@ app.get("/api/health", (req, res) => {
     3: "disconnecting",
   };
 
-  res.json({
-    status: "OK",
+  res.status(200).json({
+    status: "success",
+    message: "Server is healthy",
     server: "running",
     security: {
       helmet: true,
@@ -150,20 +187,15 @@ app.get("/api/health", (req, res) => {
       host: mongoose.connection.host || "Not connected",
       port: mongoose.connection.port || 27017,
     },
-    email: {
-      configured: !!process.env.EMAIL_HOST && !!process.env.EMAIL_USERNAME,
-      service: process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap",
-      host: process.env.EMAIL_HOST || "Not configured",
-    },
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
+    environment: NODE_ENV,
     uptime: process.uptime(),
   });
 });
 
 app.get("/", (req, res) => {
   res.json({
-    message: `Server is running in ${process.env.NODE_ENV || "development"} mode! 🚀`,
+    message: `Server is running in ${NODE_ENV} mode! 🚀`,
     security: {
       helmet: "Active ✅",
       cors: process.env.CLIENT_URL ? "Restricted" : "All origins (development)",
@@ -173,31 +205,18 @@ app.get("/", (req, res) => {
         noSqlInjectionProtection: "Active ✅",
       },
       parameterPollutionProtection: "Active ✅",
-      headers: [
-        "Content-Security-Policy",
-        "X-Frame-Options",
-        "X-Content-Type-Options",
-        "Referrer-Policy",
-        "Permissions-Policy",
-        "Strict-Transport-Security",
-      ],
     },
     database: {
       name: mongoose.connection.name || "Not connected",
       status:
         mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
     },
-    email: {
-      configured: !!process.env.EMAIL_HOST && !!process.env.EMAIL_USERNAME,
-      service: process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap",
-    },
     endpoints: {
-      auth: "/api/v1/auth",
-      users: "/api/v1/users",
-      tours: "/api/v1/tours",
-      guides: "/api/v1/guides",
-      email: "/api/v1/email",
-      health: "/api/health",
+      auth: `${API_VERSION}/auth`,
+      users: `${API_VERSION}/users`,
+      tours: `${API_VERSION}/tours`,
+      reviews: `${API_VERSION}/reviews`,
+      health: "/health",
     },
     rateLimiting: {
       enabled: true,
@@ -208,66 +227,119 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use(notFound);
-app.use(errorHandler);
+app.all("*", (req, res, next) => {
+  next(new AppError(`Can't find ${req.originalUrl} on this server`, 404));
+});
 
-const PORT = process.env.PORT || 5000;
+app.use((err, req, res) => {
+  err.statusCode = err.statusCode || 500;
+  err.status = err.status || "error";
+
+  if (NODE_ENV === "development") {
+    console.error("❌ Error:", err);
+
+    return res.status(err.statusCode).json({
+      status: err.status,
+      message: err.message,
+      stack: err.stack,
+      error: err,
+    });
+  }
+
+  let error = { ...err };
+
+  error.message = err.message;
+
+  if (err.name === "CastError") {
+    error = new AppError(`Invalid ${err.path}: ${err.value}`, 400);
+  }
+
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyPattern)[0];
+
+    error = new AppError(
+      `Duplicate field value: ${field}. Please use another value`,
+      400,
+    );
+  }
+
+  if (err.name === "ValidationError") {
+    const messages = Object.values(err.errors).map((e) => e.message);
+
+    error = new AppError(messages.join(". "), 400);
+  }
+
+  if (err.name === "JsonWebTokenError") {
+    error = new AppError("Invalid token. Please log in again.", 401);
+  }
+
+  if (err.name === "TokenExpiredError") {
+    error = new AppError("Your token has expired. Please log in again.", 401);
+  }
+
+  res.status(error.statusCode || 500).json({
+    status: error.status || "error",
+    message: error.message || "Something went wrong",
+  });
+});
+
 const server = app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🌍 Environment: ${NODE_ENV}`);
   console.log(`🛡️ Security Headers: Active (Helmet.js)`);
   console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
   console.log(`🛡️ XSS Protection: Active (xss-clean)`);
   console.log(`🛡️ NoSQL Injection Protection: Active (mongo-sanitize)`);
   console.log(`🛡️ Parameter Pollution Protection: Active (hpp)`);
-  console.log(`📊 Database: ${mongoose.connection.name || "zuri-tours"}`);
-  console.log(
-    `📧 Email Service: ${process.env.NODE_ENV === "production" ? "SendGrid" : "Mailtrap"}`,
-  );
-  console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📚 Available endpoints:`);
-  console.log(`   - Auth:    /api/v1/auth`);
-  console.log(`   - Users:   /api/v1/users`);
-  console.log(`   - Tours:   /api/v1/tours`);
-  console.log(`   - Guides:  /api/v1/guides`);
-  console.log(`   - Email:   /api/v1/email`);
-  console.log(
-    `\n📧 Email Test: POST http://localhost:${PORT}/api/v1/email/test`,
-  );
-  console.log(`   Body: { "email": "your-email@example.com" }`);
+  console.log(`📊 Database: ${mongoose.connection.name || "tourDB"}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`📚 API Documentation: http://localhost:${PORT}${API_VERSION}`);
+  console.log(`\n📋 Available endpoints:`);
+  console.log(`   - Auth:    ${API_VERSION}/auth`);
+  console.log(`   - Users:   ${API_VERSION}/users`);
+  console.log(`   - Tours:   ${API_VERSION}/tours`);
+  console.log(`   - Reviews: ${API_VERSION}/reviews`);
+  console.log(`   - Health:  /health`);
 });
 
-process.on("unhandledRejection", (err) => {
-  console.error("❌ UNHANDLED REJECTION! 💥 Shutting down...");
-  console.error(err.name, err.message);
-  console.error(err.stack);
+const shutdown = () => {
+  console.log("\n🛑 Shutting down server...");
   server.close(() => {
-    console.error("💥 Server shutting down due to unhandled rejection");
-    process.exit(1);
+    console.log("💤 Server closed");
+    mongoose.connection.close(false, () => {
+      console.log("📦 MongoDB connection closed");
+      process.exit(0);
+    });
   });
-});
 
-process.on("uncaughtException", (err) => {
-  console.error("❌ UNCAUGHT EXCEPTION! 💥 Shutting down...");
-  console.error(err.name, err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+  setTimeout(() => {
+    console.error("⚠️ Forced shutdown after timeout");
+    process.exit(1);
+  }, 10000);
+};
 
 process.on("SIGTERM", () => {
   console.log("👋 SIGTERM RECEIVED. Shutting down gracefully...");
-  server.close(() => {
-    console.log("💥 Process terminated!");
-    process.exit(0);
-  });
+  shutdown();
 });
 
 process.on("SIGINT", () => {
   console.log("👋 SIGINT RECEIVED. Shutting down gracefully...");
-  server.close(() => {
-    console.log("💥 Process terminated!");
-    process.exit(0);
-  });
+  shutdown();
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("❌ UNHANDLED REJECTION! 💥");
+  console.error(err.name, err.message);
+  console.error(err.stack);
+  shutdown();
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("❌ UNCAUGHT EXCEPTION! 💥");
+  console.error(err.name, err.message);
+  console.error(err.stack);
+  shutdown();
 });
 
 export default app;
