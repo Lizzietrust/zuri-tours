@@ -1,4 +1,4 @@
-import mongoose from "mongoose"; // eslint-disable-line import/no-extraneous-dependencies
+import mongoose from "mongoose";
 import Tour from "./Tour.js";
 
 const reviewSchema = new mongoose.Schema(
@@ -22,43 +22,36 @@ const reviewSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-
     tour: {
       type: mongoose.Schema.ObjectId,
       ref: "Tour",
       required: [true, "Review must belong to a tour"],
       index: true,
     },
-
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
       required: [true, "Review must belong to a user"],
       index: true,
     },
-
     title: {
       type: String,
       trim: true,
       maxlength: [100, "Title cannot be more than 100 characters"],
     },
-
     helpfulCount: {
       type: Number,
       default: 0,
       min: 0,
     },
-
     isVerifiedPurchase: {
       type: Boolean,
       default: false,
     },
-
     isRecommended: {
       type: Boolean,
       default: true,
     },
-
     response: {
       text: {
         type: String,
@@ -73,13 +66,11 @@ const reviewSchema = new mongoose.Schema(
         type: Date,
       },
     },
-
     status: {
       type: String,
       enum: ["pending", "approved", "rejected", "flagged"],
       default: "pending",
     },
-
     flagReasons: [
       {
         reason: {
@@ -97,7 +88,6 @@ const reviewSchema = new mongoose.Schema(
         },
       },
     ],
-
     metadata: {
       userAgent: String,
       ipAddress: String,
@@ -114,7 +104,6 @@ const reviewSchema = new mongoose.Schema(
         enum: ["mobile", "desktop", "tablet", "other"],
       },
     },
-
     attachments: [
       {
         url: String,
@@ -129,7 +118,6 @@ const reviewSchema = new mongoose.Schema(
         },
       },
     ],
-
     editHistory: [
       {
         review: String,
@@ -153,7 +141,6 @@ const reviewSchema = new mongoose.Schema(
 );
 
 reviewSchema.index({ tour: 1, user: 1 }, { unique: true });
-
 reviewSchema.index({ tour: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, createdAt: -1 });
 reviewSchema.index({ rating: -1 });
@@ -162,10 +149,21 @@ reviewSchema.index({ isVerifiedPurchase: 1 });
 reviewSchema.index({ createdAt: -1 });
 reviewSchema.index({ helpfulCount: -1 });
 reviewSchema.index({ "metadata.location.coordinates": "2dsphere" });
-
 reviewSchema.index({ tour: 1, status: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, status: 1 });
 reviewSchema.index({ rating: -1, helpfulCount: -1 });
+
+reviewSchema.index(
+  { review: "text", title: "text" },
+  {
+    weights: {
+      review: 10,
+      title: 5,
+    },
+    name: "TextIndex",
+    default_language: "english",
+  },
+);
 
 reviewSchema.virtual("formattedRating").get(function getFormattedRating() {
   const stars = "⭐".repeat(Math.floor(this.rating));
@@ -204,11 +202,9 @@ reviewSchema.query = {
   byTour(tourId) {
     return this.where("tour").equals(tourId);
   },
-
   byUser(userId) {
     return this.where("user").equals(userId);
   },
-
   byRating(minRating, maxRating) {
     let query = this.where("rating").gte(minRating);
 
@@ -218,51 +214,39 @@ reviewSchema.query = {
 
     return query;
   },
-
   byStatus(status) {
     return this.where("status").equals(status);
   },
-
   approved() {
     return this.where("status").equals("approved");
   },
-
   pending() {
     return this.where("status").equals("pending");
   },
-
   verified() {
     return this.where("isVerifiedPurchase").equals(true);
   },
-
   recommended() {
     return this.where("isRecommended").equals(true);
   },
-
   withHelpful(minCount = 1) {
     return this.where("helpfulCount").gte(minCount);
   },
-
   sortByNewest() {
     return this.sort({ createdAt: -1 });
   },
-
   sortByOldest() {
     return this.sort({ createdAt: 1 });
   },
-
   sortByHighestRating() {
     return this.sort({ rating: -1 });
   },
-
   sortByLowestRating() {
     return this.sort({ rating: 1 });
   },
-
   sortByMostHelpful() {
     return this.sort({ helpfulCount: -1 });
   },
-
   search(text) {
     return this.find({
       $text: {
@@ -273,25 +257,21 @@ reviewSchema.query = {
       },
     });
   },
-
   paginate(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
 
     return this.skip(skip).limit(limit);
   },
-
   selectBasic() {
     return this.select(
       "review rating createdAt tour user helpfulCount isVerifiedPurchase isRecommended",
     );
   },
-
   selectDetailed() {
     return this.select(
       "review rating createdAt tour user helpfulCount isVerifiedPurchase isRecommended title response status attachments",
     );
   },
-
   populateParents(populateUser = true, populateTour = true) {
     let query = this;
 
@@ -301,7 +281,6 @@ reviewSchema.query = {
         select: "name email profileImage role",
       });
     }
-
     if (populateTour) {
       query = query.populate({
         path: "tour",
@@ -311,28 +290,24 @@ reviewSchema.query = {
 
     return query;
   },
-
   populateResponseUser() {
     return this.populate({
       path: "response.respondedBy",
       select: "name email role profileImage",
     });
   },
-
   populateFlagUsers() {
     return this.populate({
       path: "flagReasons.flaggedBy",
       select: "name email role",
     });
   },
-
   populateEditHistory() {
     return this.populate({
       path: "editHistory.editedBy",
       select: "name email role",
     });
   },
-
   populateAll() {
     return this.populateParents(true, true)
       .populateResponseUser()
@@ -602,7 +577,6 @@ reviewSchema.methods.flagReview = async function flagReview(
   return this;
 };
 
-// Approve review
 reviewSchema.methods.approve = async function approve() {
   this.status = "approved";
   await this.save();
@@ -611,7 +585,6 @@ reviewSchema.methods.approve = async function approve() {
   return this;
 };
 
-// Reject review
 reviewSchema.methods.reject = async function reject() {
   this.status = "rejected";
   await this.save();
@@ -620,7 +593,6 @@ reviewSchema.methods.reject = async function reject() {
   return this;
 };
 
-// Edit review
 reviewSchema.methods.editReview = async function editReview(
   newReview,
   newRating,
@@ -630,7 +602,6 @@ reviewSchema.methods.editReview = async function editReview(
     this.editHistory = [];
   }
 
-  // Save current version to history
   this.editHistory.push({
     review: this.review,
     rating: this.rating,
@@ -638,41 +609,26 @@ reviewSchema.methods.editReview = async function editReview(
     editedBy: editorId,
   });
 
-  // Update review
   this.review = newReview;
   this.rating = newRating;
   await this.save();
 
-  // Recalculate tour ratings
   await this.constructor.calcAverageRatings(this.tour);
 
   return this;
 };
 
-// ==================== MIDDLEWARE ====================
-
-// Pre-save middleware
 reviewSchema.pre("save", function preSaveMiddleware(next) {
   try {
-    // Auto-approve if user is admin or tour creator
-    // This would need user context - you can pass it through the request
-    // For now, we'll set it as pending by default
-
-    // Validate rating is between 1 and 5
     if (this.rating < 1 || this.rating > 5) {
       throw new Error("Rating must be between 1 and 5");
     }
-
-    // Check for duplicate review
-    // This is handled by the unique index
-
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Post-save middleware - update tour ratings
 reviewSchema.post("save", async function handleSavePost() {
   try {
     await this.constructor.calcAverageRatings(this.tour);
@@ -681,7 +637,6 @@ reviewSchema.post("save", async function handleSavePost() {
   }
 });
 
-// Post-findOneAndUpdate middleware - update tour ratings
 reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   try {
     if (doc) {
@@ -692,7 +647,6 @@ reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   }
 });
 
-// Post-delete middleware
 reviewSchema.post(
   "findOneAndDelete",
   async function handleFindOneAndDelete(doc) {
@@ -706,43 +660,16 @@ reviewSchema.post(
   },
 );
 
-// Pre-find middleware - apply default filters
 reviewSchema.pre("find", function preFindMiddleware() {
-  // Optionally apply default filters
-  // For example, by default only show approved reviews
   if (!this._includeAll && !this._skipStatusFilter) {
     this.where("status").equals("approved");
   }
 });
 
-// Post-find middleware - log or transform
-reviewSchema.post("find", function postFindMiddleware(_docs) {
-  // Can add logging or transformations here if needed
-  // _docs parameter is intentionally unused
-});
-
-// ==================== MODEL CREATION ====================
-
-// Add text index for search
-reviewSchema.index(
-  { review: "text", title: "text" },
-  {
-    weights: {
-      review: 10,
-      title: 5,
-    },
-    name: "TextIndex",
-    default_language: "english",
-  },
-);
-
-// Create the model
-const Review = mongoose.model("Review", reviewSchema);
-
-// ==================== STATIC QUERY METHODS ====================
-
-// Get all reviews for a tour with options
-Review.getAllForTour = function getAllForTour(tourId, options = {}) {
+reviewSchema.statics.getAllForTour = function getAllForTour(
+  tourId,
+  options = {},
+) {
   const {
     limit = 10,
     page = 1,
@@ -781,16 +708,17 @@ Review.getAllForTour = function getAllForTour(tourId, options = {}) {
   return query.lean();
 };
 
-// Get a user's review for a specific tour
-Review.getUserReviewForTour = function getUserReviewForTour(userId, tourId) {
+reviewSchema.statics.getUserReviewForTour = function getUserReviewForTour(
+  userId,
+  tourId,
+) {
   return this.findOne({
     user: userId,
     tour: tourId,
   });
 };
 
-// Get top-rated reviews
-Review.getTopReviews = function getTopReviews(limit = 5) {
+reviewSchema.statics.getTopReviews = function getTopReviews(limit = 5) {
   return this.find({ status: "approved" })
     .sort("-rating")
     .limit(limit)
@@ -805,8 +733,7 @@ Review.getTopReviews = function getTopReviews(limit = 5) {
     .lean();
 };
 
-// Get most recent reviews
-Review.getRecentReviews = function getRecentReviews(limit = 5) {
+reviewSchema.statics.getRecentReviews = function getRecentReviews(limit = 5) {
   return this.find({ status: "approved" })
     .sort("-createdAt")
     .limit(limit)
@@ -820,5 +747,7 @@ Review.getRecentReviews = function getRecentReviews(limit = 5) {
     })
     .lean();
 };
+
+const Review = mongoose.models.Review || mongoose.model("Review", reviewSchema);
 
 export default Review;
