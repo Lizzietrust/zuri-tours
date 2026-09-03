@@ -1,8 +1,35 @@
 import Review from "../models/Review.js";
 import Tour from "../models/Tour.js";
-// import User from "../models/User.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
+
+const POPULATION_CONFIG = {
+  user: {
+    path: "user",
+    select: "name email profileImage role bio",
+  },
+  tour: {
+    path: "tour",
+    select:
+      "name slug price duration difficulty imageCover ratingsAverage ratingsQuantity",
+  },
+  responseUser: {
+    path: "response.respondedBy",
+    select: "name email role profileImage",
+  },
+  flagUsers: {
+    path: "flagReasons.flaggedBy",
+    select: "name email role",
+  },
+  editHistory: {
+    path: "editHistory.editedBy",
+    select: "name email role",
+  },
+  attachments: {
+    path: "attachments",
+    select: "url type caption uploadedAt",
+  },
+};
 
 const populateReviewFields = (query, populateOptions = {}) => {
   const {
@@ -11,71 +38,139 @@ const populateReviewFields = (query, populateOptions = {}) => {
     populateResponseUser = false,
     populateFlagUsers = false,
     populateEditHistory = false,
+    populateAttachments = false,
     populateAll = false,
+
+    customPopulations = [],
   } = populateOptions;
 
   let populatedQuery = query;
 
   if (populateAll) {
     return populatedQuery
-      .populate({
-        path: "user",
-        select: "name email profileImage role",
-      })
-      .populate({
-        path: "tour",
-        select: "name slug price duration difficulty imageCover",
-      })
-      .populate({
-        path: "response.respondedBy",
-        select: "name email role profileImage",
-      })
-      .populate({
-        path: "flagReasons.flaggedBy",
-        select: "name email role",
-      })
-      .populate({
-        path: "editHistory.editedBy",
-        select: "name email role",
-      });
+      .populate(POPULATION_CONFIG.user)
+      .populate(POPULATION_CONFIG.tour)
+      .populate(POPULATION_CONFIG.responseUser)
+      .populate(POPULATION_CONFIG.flagUsers)
+      .populate(POPULATION_CONFIG.editHistory)
+      .populate(POPULATION_CONFIG.attachments);
   }
 
   if (populateUser) {
-    populatedQuery = populatedQuery.populate({
-      path: "user",
-      select: "name email profileImage role",
-    });
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.user);
   }
 
   if (populateTour) {
-    populatedQuery = populatedQuery.populate({
-      path: "tour",
-      select: "name slug price duration difficulty imageCover",
-    });
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.tour);
   }
 
   if (populateResponseUser) {
-    populatedQuery = populatedQuery.populate({
-      path: "response.respondedBy",
-      select: "name email role profileImage",
-    });
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.responseUser);
   }
 
   if (populateFlagUsers) {
-    populatedQuery = populatedQuery.populate({
-      path: "flagReasons.flaggedBy",
-      select: "name email role",
-    });
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.flagUsers);
   }
 
   if (populateEditHistory) {
-    populatedQuery = populatedQuery.populate({
-      path: "editHistory.editedBy",
-      select: "name email role",
-    });
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.editHistory);
+  }
+
+  if (populateAttachments) {
+    populatedQuery = populatedQuery.populate(POPULATION_CONFIG.attachments);
+  }
+
+  for (const custom of customPopulations) {
+    populatedQuery = populatedQuery.populate(custom);
   }
 
   return populatedQuery;
+};
+
+// const parsePopulationOptions = (query) => {
+//   const {
+//     populateUser = "true",
+//     populateTour = "true",
+//     populateResponseUser = "false",
+//     populateFlagUsers = "false",
+//     populateEditHistory = "false",
+//     populateAttachments = "false",
+//     populateAll = "false",
+//     // Custom field selections
+//     userFields = "name email profileImage role",
+//     tourFields = "name slug price duration difficulty imageCover",
+//     responseUserFields = "name email role profileImage",
+//     flagUserFields = "name email role",
+//     editHistoryFields = "name email role",
+//   } = query;
+
+//   return {
+//     populateUser: populateUser === "true",
+//     populateTour: populateTour === "true",
+//     populateResponseUser: populateResponseUser === "true",
+//     populateFlagUsers: populateFlagUsers === "true",
+//     populateEditHistory: populateEditHistory === "true",
+//     populateAttachments: populateAttachments === "true",
+//     populateAll: populateAll === "true",
+//     // Custom field selections
+//     userFields,
+//     tourFields,
+//     responseUserFields,
+//     flagUserFields,
+//     editHistoryFields,
+//   };
+// };
+
+const buildPopulationOptions = (parsedOptions, userRole = null) => {
+  const options = {
+    populateUser: parsedOptions.populateUser,
+    populateTour: parsedOptions.populateTour,
+    populateResponseUser: parsedOptions.populateResponseUser,
+    populateAttachments: parsedOptions.populateAttachments,
+    populateAll: parsedOptions.populateAll,
+    customPopulations: [],
+  };
+
+  if (userRole === "admin") {
+    options.populateFlagUsers = parsedOptions.populateFlagUsers || true;
+    options.populateEditHistory = parsedOptions.populateEditHistory || true;
+  } else {
+    options.populateFlagUsers = false;
+    options.populateEditHistory = false;
+  }
+
+  if (
+    parsedOptions.userFields &&
+    parsedOptions.userFields !== "name email profileImage role"
+  ) {
+    options.customPopulations.push({
+      path: "user",
+      select: parsedOptions.userFields,
+    });
+  }
+
+  if (
+    parsedOptions.tourFields &&
+    parsedOptions.tourFields !==
+      "name slug price duration difficulty imageCover"
+  ) {
+    options.customPopulations.push({
+      path: "tour",
+      select: parsedOptions.tourFields,
+    });
+  }
+
+  if (
+    parsedOptions.responseUserFields &&
+    parsedOptions.responseUserFields !== "name email role profileImage"
+  ) {
+    options.customPopulations.push({
+      path: "response.respondedBy",
+      select: parsedOptions.responseUserFields,
+    });
+  }
+
+  return options;
 };
 
 export const createReview = catchAsync(async (req, res) => {
@@ -121,24 +216,33 @@ export const createReview = catchAsync(async (req, res) => {
     user: req.user._id,
     isVerifiedPurchase,
     isRecommended: isRecommended !== undefined ? isRecommended : true,
+
+    metadata: {
+      userAgent: req.headers["user-agent"],
+      ipAddress: req.ip || req.connection.remoteAddress,
+      device: req.device?.type || "other",
+    },
   };
 
-  if (req.user.role === "admin" || req.user.role === "lead-guide") {
+  const isTourCreator = tour.createdBy.toString() === req.user._id.toString();
+
+  if (
+    req.user.role === "admin" ||
+    req.user.role === "lead-guide" ||
+    isTourCreator
+  ) {
     reviewData.status = "approved";
   }
 
   const newReview = await Review.create(reviewData);
 
-  const populatedReview = await Review.findById(newReview._id)
-    .populate({
-      path: "user",
-      select: "name email profileImage",
-    })
-    .populate({
-      path: "tour",
-      select: "name slug price duration difficulty imageCover",
-    })
-    .lean();
+  const populatedReview = await populateReviewFields(
+    Review.findById(newReview._id),
+    {
+      populateUser: true,
+      populateTour: true,
+    },
+  ).lean();
 
   res.status(201).json({
     status: "success",
@@ -156,9 +260,16 @@ export const getAllReviews = catchAsync(async (req, res) => {
     status = "approved",
     minRating,
     maxRating,
-    populateUser = true,
-    populateTour = true,
-    populateAll = false,
+
+    populateAll = "false",
+    populateUser = "true",
+    populateTour = "true",
+    populateResponseUser = "false",
+    populateAttachments = "false",
+
+    userFields,
+    tourFields,
+    responseUserFields,
   } = req.query;
 
   let query = Review.find({ tour: tourId });
@@ -189,6 +300,10 @@ export const getAllReviews = catchAsync(async (req, res) => {
     rating: { rating: 1 },
     "-helpfulCount": { helpfulCount: -1 },
     helpfulCount: { helpfulCount: 1 },
+    "-isVerifiedPurchase": { isVerifiedPurchase: -1 },
+    isVerifiedPurchase: { isVerifiedPurchase: 1 },
+    "-isRecommended": { isRecommended: -1 },
+    isRecommended: { isRecommended: 1 },
   };
 
   query = query.sort(sortOptions[sort] || { createdAt: -1 });
@@ -199,13 +314,22 @@ export const getAllReviews = catchAsync(async (req, res) => {
 
   query = query.skip(skip).limit(limitNum);
 
-  const populateOptions = {
-    populateUser: populateUser === "true",
-    populateTour: populateTour === "true",
-    populateAll: populateAll === "true",
+  const parsedOptions = {
+    populateAll,
+    populateUser,
+    populateTour,
+    populateResponseUser,
+    populateAttachments,
+    populateFlagUsers: "false",
+    populateEditHistory: "false",
+    userFields,
+    tourFields,
+    responseUserFields,
   };
 
-  query = populateReviewFields(query, populateOptions);
+  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
+
+  query = populateReviewFields(query, popOptions);
 
   const reviews = await query.lean();
 
@@ -228,20 +352,35 @@ export const getAllReviews = catchAsync(async (req, res) => {
 
 export const getReview = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const { populateAll = "true" } = req.query;
+  const {
+    populateAll = "true",
+    populateUser = "true",
+    populateTour = "true",
+    populateResponseUser = "true",
+    populateAttachments = "true",
+    userFields,
+    tourFields,
+    responseUserFields,
+  } = req.query;
 
   let query = Review.findById(id);
 
-  const populateOptions = {
-    populateUser: true,
-    populateTour: true,
-    populateResponseUser: true,
-    populateFlagUsers: req.user && req.user.role === "admin",
-    populateEditHistory: req.user && req.user.role === "admin",
-    populateAll: populateAll === "true",
+  const parsedOptions = {
+    populateAll,
+    populateUser,
+    populateTour,
+    populateResponseUser,
+    populateAttachments,
+    populateFlagUsers: "true",
+    populateEditHistory: "true",
+    userFields,
+    tourFields,
+    responseUserFields,
   };
 
-  query = populateReviewFields(query, populateOptions);
+  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
+
+  query = populateReviewFields(query, popOptions);
 
   const review = await query.lean();
 
@@ -323,20 +462,15 @@ export const updateReview = catchAsync(async (req, res) => {
     },
   );
 
-  const populatedReview = await Review.findById(updatedReview._id)
-    .populate({
-      path: "user",
-      select: "name email profileImage",
-    })
-    .populate({
-      path: "tour",
-      select: "name slug price duration difficulty imageCover",
-    })
-    .populate({
-      path: "editHistory.editedBy",
-      select: "name email",
-    })
-    .lean();
+  const populatedReview = await populateReviewFields(
+    Review.findById(updatedReview._id),
+    {
+      populateUser: true,
+      populateTour: true,
+      populateEditHistory: true,
+      populateResponseUser: true,
+    },
+  ).lean();
 
   res.status(200).json({
     status: "success",
@@ -372,7 +506,6 @@ export const deleteReview = catchAsync(async (req, res) => {
     await review.save();
   }
 
-  // Recalculate tour ratings
   await Review.calcAverageRatings(review.tour);
 
   res.status(204).json({
@@ -381,9 +514,6 @@ export const deleteReview = catchAsync(async (req, res) => {
   });
 });
 
-// ==================== REVIEW ACTIONS ====================
-
-// Mark review as helpful
 export const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -393,27 +523,27 @@ export const markHelpful = catchAsync(async (req, res) => {
     throw new AppError("Review not found", 404);
   }
 
-  // Can only mark approved reviews as helpful
   if (review.status !== "approved") {
     throw new AppError("This review cannot be marked as helpful", 400);
   }
 
-  // Check if user already marked this review as helpful
-  // You might want to implement this with a separate collection
-  // For now, we'll just increment the count
-
   await review.markHelpful();
+
+  const populatedReview = await populateReviewFields(Review.findById(id), {
+    populateUser: true,
+    populateTour: true,
+  }).lean();
 
   res.status(200).json({
     status: "success",
     message: "Review marked as helpful",
     data: {
       helpfulCount: review.helpfulCount,
+      review: populatedReview,
     },
   });
 });
 
-// Add response to review
 export const addReviewResponse = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
@@ -428,7 +558,6 @@ export const addReviewResponse = catchAsync(async (req, res) => {
     throw new AppError("Review not found", 404);
   }
 
-  // Check if user is authorized to respond
   const tour = await Tour.findById(review.tour);
 
   if (!tour) {
@@ -445,13 +574,11 @@ export const addReviewResponse = catchAsync(async (req, res) => {
 
   await review.addResponse(text, req.user._id);
 
-  // Populate the response user
-  const populatedReview = await Review.findById(id)
-    .populate({
-      path: "response.respondedBy",
-      select: "name email role profileImage",
-    })
-    .lean();
+  const populatedReview = await populateReviewFields(Review.findById(id), {
+    populateUser: true,
+    populateTour: true,
+    populateResponseUser: true,
+  }).lean();
 
   res.status(200).json({
     status: "success",
@@ -460,9 +587,6 @@ export const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
-// ==================== ADMIN REVIEW MANAGEMENT ====================
-
-// Approve review (admin only)
 export const approveReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -472,23 +596,18 @@ export const approveReview = catchAsync(async (req, res) => {
     throw new AppError("Review not found", 404);
   }
 
-  // Only admins can approve reviews
   if (req.user.role !== "admin") {
     throw new AppError("You are not authorized to approve reviews", 403);
   }
 
   await review.approve();
 
-  const populatedReview = await Review.findById(id)
-    .populate({
-      path: "user",
-      select: "name email profileImage",
-    })
-    .populate({
-      path: "tour",
-      select: "name slug price duration",
-    })
-    .lean();
+  const populatedReview = await populateReviewFields(Review.findById(id), {
+    populateUser: true,
+    populateTour: true,
+    populateResponseUser: true,
+    populateFlagUsers: true,
+  }).lean();
 
   res.status(200).json({
     status: "success",
@@ -497,7 +616,6 @@ export const approveReview = catchAsync(async (req, res) => {
   });
 });
 
-// Reject review (admin only)
 export const rejectReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -507,7 +625,6 @@ export const rejectReview = catchAsync(async (req, res) => {
     throw new AppError("Review not found", 404);
   }
 
-  // Only admins can reject reviews
   if (req.user.role !== "admin") {
     throw new AppError("You are not authorized to reject reviews", 403);
   }
@@ -520,7 +637,6 @@ export const rejectReview = catchAsync(async (req, res) => {
   });
 });
 
-// Flag review
 export const flagReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { reason, description } = req.body;
@@ -535,7 +651,6 @@ export const flagReview = catchAsync(async (req, res) => {
     throw new AppError("Review not found", 404);
   }
 
-  // Check if user already flagged this review
   const alreadyFlagged = review.flagReasons.some(
     (flag) => flag.flaggedBy.toString() === req.user._id.toString(),
   );
@@ -546,15 +661,19 @@ export const flagReview = catchAsync(async (req, res) => {
 
   await review.flagReview(reason, description || "", req.user._id);
 
+  const populatedReview = await populateReviewFields(Review.findById(id), {
+    populateUser: true,
+    populateTour: true,
+    populateFlagUsers: true,
+  }).lean();
+
   res.status(200).json({
     status: "success",
     message: "Review flagged successfully",
+    data: { review: populatedReview },
   });
 });
 
-// ==================== REVIEW STATISTICS ====================
-
-// Get review statistics for a tour
 export const getReviewStats = catchAsync(async (req, res) => {
   const { tourId } = req.params;
 
@@ -567,18 +686,18 @@ export const getReviewStats = catchAsync(async (req, res) => {
   const stats = await Review.getReviewStats(tourId);
   const distribution = await Review.getRatingDistribution(tourId);
 
-  // Get recent reviews
-  const recentReviews = await Review.find({
-    tour: tourId,
-    status: "approved",
-  })
-    .sort("-createdAt")
-    .limit(3)
-    .populate({
-      path: "user",
-      select: "name email profileImage",
+  const recentReviews = await populateReviewFields(
+    Review.find({
+      tour: tourId,
+      status: "approved",
     })
-    .lean();
+      .sort("-createdAt")
+      .limit(3),
+    {
+      populateUser: true,
+      populateTour: false,
+    },
+  ).lean();
 
   res.status(200).json({
     status: "success",
@@ -608,7 +727,17 @@ export const getReviewStats = catchAsync(async (req, res) => {
 
 // Get user's reviews
 export const getMyReviews = catchAsync(async (req, res) => {
-  const { page = 1, limit = 10, sort = "-createdAt", status } = req.query;
+  const {
+    page = 1,
+    limit = 10,
+    sort = "-createdAt",
+    status,
+    populateAll = "false",
+    populateTour = "true",
+    populateResponseUser = "true",
+    populateAttachments = "false",
+    tourFields,
+  } = req.query;
 
   let query = Review.find({ user: req.user._id });
 
@@ -622,16 +751,23 @@ export const getMyReviews = catchAsync(async (req, res) => {
 
   query = query.sort(sort).skip(skip).limit(limitNum);
 
-  const reviews = await query
-    .populate({
-      path: "tour",
-      select: "name slug price duration difficulty imageCover",
-    })
-    .populate({
-      path: "response.respondedBy",
-      select: "name email",
-    })
-    .lean();
+  // Parse and apply population options
+  const parsedOptions = {
+    populateAll,
+    populateUser: "false",
+    populateTour,
+    populateResponseUser,
+    populateAttachments,
+    populateFlagUsers: "false",
+    populateEditHistory: "false",
+    tourFields,
+  };
+
+  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
+
+  query = populateReviewFields(query, popOptions);
+
+  const reviews = await query.lean();
 
   const total = await Review.countDocuments({ user: req.user._id });
 
@@ -656,6 +792,10 @@ export const getTourReviews = catchAsync(async (req, res) => {
     minRating,
     maxRating,
     helpful,
+    // Population options
+    populateUser = "true",
+    populateAll = "false",
+    userFields,
   } = req.query;
 
   // Check if tour exists
@@ -698,12 +838,23 @@ export const getTourReviews = catchAsync(async (req, res) => {
 
   query = query.skip(skip).limit(limitNum);
 
-  const reviews = await query
-    .populate({
-      path: "user",
-      select: "name email profileImage",
-    })
-    .lean();
+  // Apply population
+  const parsedOptions = {
+    populateAll,
+    populateUser,
+    populateTour: "false",
+    populateResponseUser: "false",
+    populateAttachments: "false",
+    populateFlagUsers: "false",
+    populateEditHistory: "false",
+    userFields,
+  };
+
+  const popOptions = buildPopulationOptions(parsedOptions);
+
+  query = populateReviewFields(query, popOptions);
+
+  const reviews = await query.lean();
 
   const total = await Review.countDocuments({
     tour: tourId,
@@ -717,5 +868,66 @@ export const getTourReviews = catchAsync(async (req, res) => {
     page: pageNum,
     pages: Math.ceil(total / limitNum),
     data: { reviews },
+  });
+});
+
+// ==================== BULK REVIEW OPERATIONS ====================
+
+// Get reviews for multiple tours (batch)
+export const getBatchTourReviews = catchAsync(async (req, res) => {
+  const { tourIds } = req.body;
+  const {
+    limit = 5,
+    sort = "-createdAt",
+    populateUser = "true",
+    userFields,
+  } = req.query;
+
+  if (!tourIds || !Array.isArray(tourIds) || tourIds.length === 0) {
+    throw new AppError("Please provide an array of tour IDs", 400);
+  }
+
+  // Validate tours exist
+  const tours = await Tour.find({ _id: { $in: tourIds } });
+
+  if (tours.length !== tourIds.length) {
+    throw new AppError("Some tours not found", 404);
+  }
+
+  // Get reviews for all tours
+  const reviewsByTour = await Promise.all(
+    tourIds.map(async (tourId) => {
+      const query = Review.find({
+        tour: tourId,
+        status: "approved",
+      })
+        .sort(sort)
+        .limit(parseInt(limit, 10));
+
+      const parsedOptions = {
+        populateAll: "false",
+        populateUser,
+        populateTour: "false",
+        populateResponseUser: "false",
+        populateAttachments: "false",
+        populateFlagUsers: "false",
+        populateEditHistory: "false",
+        userFields,
+      };
+
+      const popOptions = buildPopulationOptions(parsedOptions);
+      const reviews = await populateReviewFields(query, popOptions).lean();
+
+      return {
+        tourId,
+        count: reviews.length,
+        reviews,
+      };
+    }),
+  );
+
+  res.status(200).json({
+    status: "success",
+    data: { reviewsByTour },
   });
 });
