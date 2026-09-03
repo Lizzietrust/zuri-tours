@@ -17,6 +17,10 @@ import {
   assignMultipleGuides,
   removeGuide,
   getAssignedTours,
+  getTourWithReviews,
+  setLeadGuide,
+  getGuideDetails,
+  addGuideRating,
 } from "../controllers/tourController.js";
 import {
   protect,
@@ -34,7 +38,11 @@ import {
   userUpdateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 
+import reviewRouter from "./reviewRoutes.js";
+
 const router = express.Router();
+
+router.use("/:tourId/reviews", reviewRouter);
 
 router.route("/top-5-cheap").get(getTopCheapTours);
 router.route("/top-rated").get(getToursByRating);
@@ -44,6 +52,8 @@ router.route("/monthly-plan/:year").get(getMonthlyPlan);
 router.route("/price-range").get(getToursByPriceRange);
 router.route("/difficulty/:level").get(getToursByDifficulty);
 router.route("/search").get(searchTours);
+
+router.route("/:id/reviews").get(getTourWithReviews);
 
 router
   .route("/")
@@ -108,9 +118,25 @@ router
   );
 
 router
+  .route("/:id/set-lead-guide")
+  .patch(
+    protect,
+    hasPermission("manage:guides"),
+    checkValidId,
+    userUpdateLimiter,
+    setLeadGuide,
+  );
+
+router
+  .route("/:id/guide-details/:guideId")
+  .get(protect, hasTourAccess, getGuideDetails);
+
+router
+  .route("/:id/guide-rating")
+  .post(protect, hasTourAccess, userUpdateLimiter, addGuideRating);
+
+router
   .route("/my-assigned-tours")
   .get(protect, authorize("guide", "lead-guide"), getAssignedTours);
-
-router.route("/:id/guide-details").get(protect, hasTourAccess, getTour);
 
 export default router;
