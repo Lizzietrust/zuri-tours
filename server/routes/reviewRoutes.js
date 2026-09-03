@@ -13,29 +13,69 @@ import {
   getReviewStats,
   getMyReviews,
   getTourReviews,
+  getBatchTourReviews,
 } from "../controllers/reviewController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
+import {
+  checkValidId,
+  validateReview,
+} from "../middleware/validationMiddleware.js";
+import {
+  reviewCreationLimiter,
+  userUpdateLimiter,
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router({ mergeParams: true });
 
-router.get("/", getTourReviews);
-router.get("/stats", getReviewStats);
+router
+  .route("/")
+  .get(getAllReviews)
+  .post(protect, reviewCreationLimiter, validateReview, createReview);
 
-router.use(protect);
+router.route("/stats").get(getReviewStats);
 
-router.post("/", createReview);
-router.get("/my-reviews", getMyReviews);
-router.get("/:id", getReview);
-router.patch("/:id", updateReview);
-router.delete("/:id", deleteReview);
+router.route("/public").get(getTourReviews);
 
-router.patch("/:id/helpful", markHelpful);
-router.patch("/:id/response", addReviewResponse);
-router.patch("/:id/flag", flagReview);
+router
+  .route("/:id")
+  .get(getReview)
+  .patch(protect, checkValidId, userUpdateLimiter, validateReview, updateReview)
+  .delete(protect, checkValidId, deleteReview);
 
-router.patch("/:id/approve", authorize("admin"), approveReview);
-router.patch("/:id/reject", authorize("admin"), rejectReview);
+router
+  .route("/:id/helpful")
+  .patch(protect, checkValidId, userUpdateLimiter, markHelpful);
 
-router.get("/admin/all", authorize("admin"), getAllReviews);
+router
+  .route("/:id/response")
+  .post(protect, checkValidId, userUpdateLimiter, addReviewResponse);
+
+router
+  .route("/:id/approve")
+  .patch(
+    protect,
+    authorize("admin"),
+    checkValidId,
+    userUpdateLimiter,
+    approveReview,
+  );
+
+router
+  .route("/:id/reject")
+  .patch(
+    protect,
+    authorize("admin"),
+    checkValidId,
+    userUpdateLimiter,
+    rejectReview,
+  );
+
+router
+  .route("/:id/flag")
+  .post(protect, checkValidId, userUpdateLimiter, flagReview);
+
+router.route("/my-reviews").get(protect, getMyReviews);
+
+router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
 
 export default router;
