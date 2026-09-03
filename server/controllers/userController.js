@@ -7,9 +7,97 @@ import {
   sendNotFoundResponse,
   sendValidationErrorResponse,
 } from "../utils/responseHelper.js";
-// import { AppError } from "../utils/appError.js";
+import {
+  deleteOne,
+  deleteMany,
+  restoreOne,
+  permanentDeleteOne,
+} from "../utils/handlerFactory.js";
+import { AppError } from "../utils/appError.js";
 
-export const getAllUsers = catchAsync(async (req, res) => {
+const deleteUser = deleteOne(User, {
+  modelName: "User",
+  softDelete: true,
+  idParam: "id",
+  conditions: { accountDeleted: false },
+  beforeDelete: async (doc, req) => {
+    if (doc._id.toString() === req.user._id.toString()) {
+      throw new AppError("You cannot delete your own account", 403);
+    }
+
+    if (doc.role === "admin" && req.user.role !== "admin") {
+      throw new AppError("Cannot delete admin users", 403);
+    }
+
+    if (doc.assignedTours && doc.assignedTours.length > 0) {
+      await Tour.updateMany(
+        { _id: { $in: doc.assignedTours } },
+        { $pull: { guides: doc._id } },
+      );
+    }
+  },
+
+  afterDelete: (doc) => {
+    console.log(`User ${doc.email} soft deleted`);
+  },
+});
+
+const permanentDeleteUser = permanentDeleteOne(User, {
+  modelName: "User",
+  idParam: "id",
+
+  beforePermanentDelete: (doc, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can permanently delete users", 403);
+    }
+
+    if (doc.role === "admin") {
+      throw new AppError("Cannot delete admin users", 403);
+    }
+
+    return doc;
+  },
+});
+
+const restoreUser = restoreOne(User, {
+  modelName: "User",
+  idParam: "id",
+
+  beforeRestore: (doc, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can restore users", 403);
+    }
+
+    return doc;
+  },
+});
+
+const bulkDeleteUsers = deleteMany(User, {
+  modelName: "User",
+  softDelete: true,
+  maxDeleteLimit: 50,
+  conditions: { accountDeleted: false },
+  beforeBulkDelete: async (docs, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can bulk delete users", 403);
+    }
+
+    const adminUsers = docs.filter((doc) => doc.role === "admin");
+
+    if (adminUsers.length > 0) {
+      throw new AppError("Cannot delete admin users", 403);
+    }
+
+    const userIds = docs.map((doc) => doc._id);
+
+    await Tour.updateMany(
+      { guides: { $in: userIds } },
+      { $pull: { guides: { $in: userIds } } },
+    );
+  },
+});
+
+const getAllUsers = catchAsync(async (req, res) => {
   const users = await User.find({ accountDeleted: false })
     .select(
       "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
@@ -23,7 +111,10 @@ export const getAllUsers = catchAsync(async (req, res) => {
   });
 });
 
-export const getUser = catchAsync(async (req, res) => {
+/**
+ * Get a single user
+ */
+const getUser = catchAsync(async (req, res) => {
   const user = await User.findOne({
     _id: req.params.id,
     accountDeleted: false,
@@ -55,7 +146,10 @@ export const getUser = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "User fetched successfully", user);
 });
 
-export const createUser = catchAsync(async (req, res) => {
+/**
+ * Create a user
+ */
+const createUser = catchAsync(async (req, res) => {
   const { name, email, password, photo, role } = req.body;
 
   const existingUser = await User.findOne({ email });
@@ -81,7 +175,10 @@ export const createUser = catchAsync(async (req, res) => {
   });
 });
 
-export const updateUser = catchAsync(async (req, res) => {
+/**
+ * Update a user
+ */
+const updateUser = catchAsync(async (req, res) => {
   const {
     password,
     passwordConfirm: _passwordConfirm,
@@ -127,22 +224,10 @@ export const updateUser = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "User updated successfully", user);
 });
 
-export const deleteUser = catchAsync(async (req, res) => {
-  const user = await User.findById(req.params.id);
-
-  if (!user) {
-    return sendNotFoundResponse(res, "User not found");
-  }
-
-  await user.softDelete();
-
-  res.status(204).json({
-    status: "success",
-    data: null,
-  });
-});
-
-export const updateUserRole = catchAsync(async (req, res) => {
+/**
+ * Update user role (admin only)
+ */
+const updateUserRole = catchAsync(async (req, res) => {
   const { role } = req.body;
   const { id } = req.params;
 
@@ -181,7 +266,10 @@ export const updateUserRole = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "User role updated successfully", user);
 });
 
-export const getUsersByRole = catchAsync(async (req, res) => {
+/**
+ * Get users by role
+ */
+const getUsersByRole = catchAsync(async (req, res) => {
   const { role } = req.params;
   const validRoles = ["user", "guide", "lead-guide", "admin"];
 
@@ -214,7 +302,10 @@ export const getUsersByRole = catchAsync(async (req, res) => {
   );
 });
 
-export const getUserTours = catchAsync(async (req, res) => {
+/**
+ * Get user tours (nested route)
+ */
+const getUserTours = catchAsync(async (req, res) => {
   const { userId } = req.params;
   const {
     page = 1,
@@ -307,7 +398,10 @@ export const getUserTours = catchAsync(async (req, res) => {
   });
 });
 
-export const getUserReviews = catchAsync(async (req, res) => {
+/**
+ * Get user reviews (nested route)
+ */
+const getUserReviews = catchAsync(async (req, res) => {
   const { userId } = req.params;
   const {
     page = 1,
@@ -475,7 +569,10 @@ export const getUserReviews = catchAsync(async (req, res) => {
   });
 });
 
-export const getUserStats = catchAsync(async (req, res) => {
+/**
+ * Get user statistics
+ */
+const getUserStats = catchAsync(async (req, res) => {
   const { id } = req.params;
 
   const isSelf = req.user._id.toString() === id;
@@ -625,7 +722,10 @@ export const getUserStats = catchAsync(async (req, res) => {
   });
 });
 
-export const getUsersWithStats = catchAsync(async (req, res) => {
+/**
+ * Get users with statistics (admin only)
+ */
+const getUsersWithStats = catchAsync(async (req, res) => {
   const users = await User.aggregate([
     {
       $match: { accountDeleted: false },
@@ -702,7 +802,10 @@ export const getUsersWithStats = catchAsync(async (req, res) => {
   );
 });
 
-export const searchUsers = catchAsync(async (req, res) => {
+/**
+ * Search users
+ */
+const searchUsers = catchAsync(async (req, res) => {
   const { q, role, limit = 20, page = 1 } = req.query;
 
   if (!q) {
@@ -754,7 +857,10 @@ export const searchUsers = catchAsync(async (req, res) => {
   });
 });
 
-export const bulkUpdateUsers = catchAsync(async (req, res) => {
+/**
+ * Bulk update users (admin only)
+ */
+const bulkUpdateUsers = catchAsync(async (req, res) => {
   const { userIds, updateData } = req.body;
 
   if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
@@ -788,26 +894,21 @@ export const bulkUpdateUsers = catchAsync(async (req, res) => {
   });
 });
 
-export const bulkDeleteUsers = catchAsync(async (req, res) => {
-  const { userIds } = req.body;
-
-  if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-    return sendValidationErrorResponse(
-      res,
-      "Please provide an array of user IDs",
-    );
-  }
-
-  const result = await User.updateMany(
-    { _id: { $in: userIds }, accountDeleted: false },
-    {
-      accountDeleted: true,
-      accountDeletedAt: new Date(),
-    },
-  );
-
-  sendSuccessResponse(res, 200, "Users deleted successfully", {
-    matchedCount: result.matchedCount,
-    modifiedCount: result.modifiedCount,
-  });
-});
+export {
+  deleteUser,
+  permanentDeleteUser,
+  restoreUser,
+  bulkDeleteUsers,
+  getAllUsers,
+  getUser,
+  createUser,
+  updateUser,
+  updateUserRole,
+  getUsersByRole,
+  getUserTours,
+  getUserReviews,
+  getUserStats,
+  getUsersWithStats,
+  searchUsers,
+  bulkUpdateUsers,
+};
