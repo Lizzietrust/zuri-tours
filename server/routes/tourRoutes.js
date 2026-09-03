@@ -5,6 +5,10 @@ import {
   createTour,
   updateTour,
   deleteTour,
+  softDeleteTour,
+  restoreTour,
+  permanentDeleteTour,
+  bulkDeleteTours,
   getTourStats,
   getMonthlyPlan,
   getToursByPriceRange,
@@ -86,6 +90,27 @@ router
     updateTour,
   )
   .delete(protect, canDeleteTour, checkValidId, deleteTour);
+
+router
+  .route("/:id/soft-delete")
+  .patch(
+    protect,
+    authorize("admin", "lead-guide"),
+    checkValidId,
+    softDeleteTour,
+  );
+
+router
+  .route("/:id/restore")
+  .patch(protect, authorize("admin"), checkValidId, restoreTour);
+
+router
+  .route("/:id/permanent")
+  .delete(protect, authorize("admin"), checkValidId, permanentDeleteTour);
+
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteTours);
 
 router
   .route("/:id/assign-guide")
