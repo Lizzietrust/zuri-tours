@@ -11,7 +11,6 @@ const tourSchema = new mongoose.Schema(
     },
     slug: {
       type: String,
-      // unique: true,
     },
     duration: {
       type: Number,
@@ -82,47 +81,23 @@ const tourSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-
-    // ==================== ENHANCED GUIDES SECTION ====================
-    // Main guides array with reference to User model
     guides: [
       {
         type: mongoose.Schema.ObjectId,
         ref: "User",
-        required: [true, "A tour must have at least one guide"],
-        validate: {
-          validator: function validateGuide(_value) {
-            // This validation will be done in pre-save middleware
-            return true;
-          },
-          message: "Invalid guide ID",
-        },
       },
     ],
-
-    // Enhanced guide details with additional metadata
     guideDetails: {
-      // Lead guide information
       leadGuide: {
         type: mongoose.Schema.ObjectId,
         ref: "User",
-        required: [true, "A tour must have a lead guide"],
-        validate: {
-          validator: function validateLeadGuide(_value) {
-            // This validation will be done in pre-save middleware
-            return true;
-          },
-          message: "Invalid lead guide ID",
-        },
       },
-      // Assistant guides
       assistantGuides: [
         {
           type: mongoose.Schema.ObjectId,
           ref: "User",
         },
       ],
-      // Guide assignments with specific roles and schedules
       guideAssignments: [
         {
           guideId: {
@@ -152,7 +127,6 @@ const tourSchema = new mongoose.Schema(
           },
         },
       ],
-      // Guide requirements
       requirements: {
         minGuides: {
           type: Number,
@@ -179,7 +153,6 @@ const tourSchema = new mongoose.Schema(
           min: 1,
         },
       },
-      // Guide compensation
       compensation: {
         type: {
           type: String,
@@ -199,7 +172,6 @@ const tourSchema = new mongoose.Schema(
         },
         notes: String,
       },
-      // Guide availability and scheduling
       scheduling: {
         shiftPattern: {
           type: String,
@@ -222,7 +194,6 @@ const tourSchema = new mongoose.Schema(
           default: false,
         },
         daysOff: [String],
-        // Alternative guides for backup
         backupGuides: [
           {
             type: mongoose.Schema.ObjectId,
@@ -230,7 +201,6 @@ const tourSchema = new mongoose.Schema(
           },
         ],
       },
-      // Guide performance tracking
       performance: {
         rating: {
           type: Number,
@@ -257,8 +227,6 @@ const tourSchema = new mongoose.Schema(
         areasForImprovement: [String],
       },
     },
-
-    // Guide-specific ratings and feedback
     guideRatings: [
       {
         guideId: {
@@ -314,7 +282,6 @@ const tourSchema = new mongoose.Schema(
         },
       },
     ],
-
     createdBy: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
@@ -333,7 +300,6 @@ const tourSchema = new mongoose.Schema(
       enum: ["adventure", "cultural", "nature", "city", "beach", "mountain"],
       default: "adventure",
     },
-
     location: {
       type: {
         type: String,
@@ -347,7 +313,6 @@ const tourSchema = new mongoose.Schema(
         validate: {
           validator: function validateCoordinates(val) {
             if (!val || val.length !== 2) return false;
-
             const [lng, lat] = val;
 
             return lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
@@ -364,7 +329,6 @@ const tourSchema = new mongoose.Schema(
         type: String,
         trim: true,
       },
-
       city: {
         type: String,
         trim: true,
@@ -390,7 +354,6 @@ const tourSchema = new mongoose.Schema(
         trim: true,
       },
     },
-
     locations: [
       {
         type: {
@@ -432,7 +395,6 @@ const tourSchema = new mongoose.Schema(
         accommodation: String,
       },
     ],
-
     geoFence: {
       radius: {
         type: Number,
@@ -459,7 +421,6 @@ const tourSchema = new mongoose.Schema(
           dinner: Boolean,
         },
         accommodation: String,
-        // Assign guides to specific itinerary days
         assignedGuides: [
           {
             guideId: {
@@ -569,21 +530,94 @@ const tourSchema = new mongoose.Schema(
   },
 );
 
-// ==================== GUIDE VIRTUALS ====================
+tourSchema.virtual("reviews", {
+  ref: "Review",
+  foreignField: "tour",
+  localField: "_id",
+  options: {
+    sort: { createdAt: -1 },
+    match: { status: "approved" },
+  },
+});
 
-// Get guide count
+tourSchema.virtual("allReviews", {
+  ref: "Review",
+  foreignField: "tour",
+  localField: "_id",
+  options: {
+    sort: { createdAt: -1 },
+  },
+});
+
+/**
+ * Virtual for recent reviews (limited to 5)
+ */
+tourSchema.virtual("recentReviews", {
+  ref: "Review",
+  foreignField: "tour",
+  localField: "_id",
+  options: {
+    sort: { createdAt: -1 },
+    limit: 5,
+    match: { status: "approved" },
+  },
+});
+
+/**
+ * Virtual for top-rated reviews
+ */
+tourSchema.virtual("topReviews", {
+  ref: "Review",
+  foreignField: "tour",
+  localField: "_id",
+  options: {
+    sort: { rating: -1, helpfulCount: -1 },
+    limit: 3,
+    match: { status: "approved" },
+  },
+});
+
+tourSchema.virtual("reviewStats", {
+  ref: "Review",
+  foreignField: "tour",
+  localField: "_id",
+  options: {
+    match: { status: "approved" },
+  },
+  count: true,
+});
+
+tourSchema.virtual("guideUsers", {
+  ref: "User",
+  foreignField: "_id",
+  localField: "guides",
+  justOne: false,
+});
+
+tourSchema.virtual("leadGuideUser", {
+  ref: "User",
+  foreignField: "_id",
+  localField: "guideDetails.leadGuide",
+  justOne: true,
+});
+
+tourSchema.virtual("assistantGuideUsers", {
+  ref: "User",
+  foreignField: "_id",
+  localField: "guideDetails.assistantGuides",
+  justOne: false,
+});
+
 tourSchema.virtual("guideCount").get(function getGuideCount() {
   return this.guides ? this.guides.length : 0;
 });
 
-// Get lead guide
 tourSchema.virtual("leadGuideInfo").get(function getLeadGuideInfo() {
   return this.guideDetails && this.guideDetails.leadGuide
     ? this.guideDetails.leadGuide
     : null;
 });
 
-// Get assistant guides
 tourSchema
   .virtual("assistantGuideCount")
   .get(function getAssistantGuideCount() {
@@ -592,7 +626,6 @@ tourSchema
       : 0;
   });
 
-// Get active guide assignments
 tourSchema
   .virtual("activeGuideAssignments")
   .get(function getActiveGuideAssignments() {
@@ -605,7 +638,6 @@ tourSchema
     );
   });
 
-// Get guide summary
 tourSchema.virtual("guideSummary").get(function getGuideSummary() {
   const details = this.guideDetails || {};
   const leadGuide = details.leadGuide || "Not assigned";
@@ -627,17 +659,14 @@ tourSchema.virtual("guideSummary").get(function getGuideSummary() {
   };
 });
 
-// Check if tour has guide requirements
 tourSchema.virtual("hasGuideRequirements").get(function hasGuideRequirements() {
   return !!(this.guideDetails && this.guideDetails.requirements);
 });
 
-// Get guide average rating
 tourSchema.virtual("guideAverageRating").get(function getGuideAverageRating() {
   if (!this.guideRatings || this.guideRatings.length === 0) {
     return 0;
   }
-
   const total = this.guideRatings.reduce(
     (sum, rating) => sum + rating.rating,
     0,
@@ -646,7 +675,6 @@ tourSchema.virtual("guideAverageRating").get(function getGuideAverageRating() {
   return Math.round((total / this.guideRatings.length) * 10) / 10;
 });
 
-// Check if guide is fully staffed
 tourSchema.virtual("isFullyStaffed").get(function isFullyStaffed() {
   const requirements = this.guideDetails?.requirements || {};
   const minGuides = requirements.minGuides || 1;
@@ -655,7 +683,6 @@ tourSchema.virtual("isFullyStaffed").get(function isFullyStaffed() {
   return currentGuides >= minGuides;
 });
 
-// Check if guide capacity is met
 tourSchema.virtual("hasGuideCapacity").get(function hasGuideCapacity() {
   const requirements = this.guideDetails?.requirements || {};
   const maxGuides = requirements.maxGuides || 5;
@@ -664,9 +691,18 @@ tourSchema.virtual("hasGuideCapacity").get(function hasGuideCapacity() {
   return currentGuides < maxGuides;
 });
 
-// ==================== GUIDE METHODS ====================
+tourSchema.virtual("reviewSummary").get(function getReviewSummary() {
+  return {
+    averageRating: this.ratingsAverage || 0,
+    totalReviews: this.ratingsQuantity || 0,
+    hasReviews: (this.ratingsQuantity || 0) > 0,
+  };
+});
 
-// Add a guide to the tour
+tourSchema.virtual("hasReviews").get(function hasReviews() {
+  return (this.ratingsQuantity || 0) > 0;
+});
+
 tourSchema.methods.addGuide = function addGuide(
   guideId,
   role = "assistant",
@@ -677,12 +713,10 @@ tourSchema.methods.addGuide = function addGuide(
     this.guides = [];
   }
 
-  // Check if guide already exists
   if (this.guides.includes(guideId)) {
     throw new Error("Guide already assigned to this tour");
   }
 
-  // Check guide capacity
   const requirements = this.guideDetails?.requirements || {};
   const maxGuides = requirements.maxGuides || 5;
 
@@ -690,16 +724,13 @@ tourSchema.methods.addGuide = function addGuide(
     throw new Error(`Maximum guide capacity of ${maxGuides} reached`);
   }
 
-  // Add to guides array
   this.guides.push(guideId);
 
-  // Add to guide assignments if guideDetails exists
   if (this.guideDetails) {
     if (!this.guideDetails.guideAssignments) {
       this.guideDetails.guideAssignments = [];
     }
 
-    // Set end date to tour end if not provided
     let finalEndDate = endDate;
 
     if (!finalEndDate) {
@@ -724,18 +755,15 @@ tourSchema.methods.addGuide = function addGuide(
   return this;
 };
 
-// Remove a guide from the tour
 tourSchema.methods.removeGuide = function removeGuide(guideId) {
   if (!this.guides) {
     throw new Error("No guides assigned to this tour");
   }
 
-  // Remove from guides array
   this.guides = this.guides.filter(
     (id) => id.toString() !== guideId.toString(),
   );
 
-  // Deactivate assignment if exists
   if (this.guideDetails && this.guideDetails.guideAssignments) {
     const assignment = this.guideDetails.guideAssignments.find(
       (a) => a.guideId.toString() === guideId.toString(),
@@ -749,7 +777,6 @@ tourSchema.methods.removeGuide = function removeGuide(guideId) {
   return this;
 };
 
-// Set lead guide
 tourSchema.methods.setLeadGuide = function setLeadGuide(guideId) {
   if (!this.guides || !this.guides.includes(guideId)) {
     throw new Error("Guide must be assigned to the tour first");
@@ -761,7 +788,6 @@ tourSchema.methods.setLeadGuide = function setLeadGuide(guideId) {
 
   this.guideDetails.leadGuide = guideId;
 
-  // Update assignment role
   if (this.guideDetails.guideAssignments) {
     const assignment = this.guideDetails.guideAssignments.find(
       (a) => a.guideId.toString() === guideId.toString(),
@@ -775,7 +801,6 @@ tourSchema.methods.setLeadGuide = function setLeadGuide(guideId) {
   return this;
 };
 
-// Add guide rating
 tourSchema.methods.addGuideRating = function addGuideRating(
   guideId,
   rating,
@@ -803,7 +828,6 @@ tourSchema.methods.addGuideRating = function addGuideRating(
   return this;
 };
 
-// Get guide rating by guide ID
 tourSchema.methods.getGuideRating = function getGuideRating(guideId) {
   if (!this.guideRatings) {
     return null;
@@ -827,7 +851,6 @@ tourSchema.methods.getGuideRating = function getGuideRating(guideId) {
   };
 };
 
-// Get guide assignment by guide ID
 tourSchema.methods.getGuideAssignment = function getGuideAssignment(guideId) {
   if (!this.guideDetails || !this.guideDetails.guideAssignments) {
     return null;
@@ -840,7 +863,6 @@ tourSchema.methods.getGuideAssignment = function getGuideAssignment(guideId) {
   );
 };
 
-// Check if guide is assigned to tour
 tourSchema.methods.isGuideAssigned = function isGuideAssigned(guideId) {
   if (!this.guides) {
     return false;
@@ -849,26 +871,19 @@ tourSchema.methods.isGuideAssigned = function isGuideAssigned(guideId) {
   return this.guides.some((id) => id.toString() === guideId.toString());
 };
 
-// ==================== GUIDE QUERY METHODS ====================
-
 tourSchema.query = {
-  // Existing query methods...
   priceRange(min, max) {
     return this.where("price").gte(min).lte(max);
   },
-
   durationRange(min, max) {
     return this.where("duration").gte(min).lte(max);
   },
-
   byDifficulty(difficulty) {
     return this.where("difficulty").equals(difficulty);
   },
-
   minRating(rating) {
     return this.where("ratingsAverage").gte(rating);
   },
-
   available() {
     const now = new Date();
 
@@ -876,23 +891,18 @@ tourSchema.query = {
       $gte: now,
     });
   },
-
   onSale() {
     return this.where("priceDiscount").gt(0);
   },
-
   featured() {
     return this.where("featured").equals(true);
   },
-
   active() {
     return this.where("isActive").equals(true);
   },
-
   byCategory(category) {
     return this.where("category").equals(category);
   },
-
   search(term) {
     return this.find({
       $text: {
@@ -903,87 +913,65 @@ tourSchema.query = {
       },
     });
   },
-
   sortByPrice(asc = true) {
     return this.sort({ price: asc ? 1 : -1 });
   },
-
   sortByRating() {
     return this.sort({ ratingsAverage: -1 });
   },
-
   sortByPopularity() {
     return this.sort({ ratingsQuantity: -1 });
   },
-
   sortByNewest() {
     return this.sort({ createdAt: -1 });
   },
-
   sortByDuration(asc = true) {
     return this.sort({ duration: asc ? 1 : -1 });
   },
-
   paginate(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
 
     return this.skip(skip).limit(limit);
   },
-
   selectBasic() {
     return this.select(
       "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary location",
     );
   },
-
   selectDetailed() {
     return this.select(
       "name slug price priceDiscount duration difficulty ratingsAverage ratingsQuantity imageCover summary description images startDates guides maxGroupSize location locations guideDetails",
     );
   },
-
   withVirtuals() {
     return this.lean().select("+virtuals");
   },
 
-  // ==================== GUIDE QUERY METHODS ====================
-
-  // Find tours by guide ID
   byGuide(guideId) {
     return this.where("guides").in([guideId]);
   },
-
-  // Find tours by lead guide
   byLeadGuide(guideId) {
     return this.where("guideDetails.leadGuide").equals(guideId);
   },
-
-  // Find tours by guide role
   byGuideRole(role) {
     return this.where("guideDetails.guideAssignments.role").equals(role);
   },
-
-  // Find tours with guide requirements
   withGuideRequirements() {
     return this.where("guideDetails.requirements").exists(true);
   },
-
   byGuideLanguage(language) {
     return this.where("guideDetails.requirements.requiredLanguages").in([
       language,
     ]);
   },
-
   byGuideExperience(minYears = 0) {
     return this.where("guideDetails.requirements.minGuideExperience").gte(
       minYears,
     );
   },
-
   withActiveGuideAssignments() {
     return this.where("guideDetails.guideAssignments.isActive").equals(true);
   },
-
   byGuideCapacity(min = 1, max = null) {
     let query = this.where("guideDetails.requirements.minGuides").gte(min);
 
@@ -993,21 +981,17 @@ tourSchema.query = {
 
     return query;
   },
-
   byGuideRating(minRating = 0) {
     return this.where("guideDetails.performance.rating").gte(minRating);
   },
-
   byCompensationType(type) {
     return this.where("guideDetails.compensation.type").equals(type);
   },
-
   fullyStaffed() {
     return this.where("guideDetails.requirements.minGuides").lte(
       this.where("guides.length"),
     );
   },
-
   hasGuideAvailability() {
     return this.where("guideDetails.scheduling.backupGuides").exists(true);
   },
@@ -1018,7 +1002,6 @@ tourSchema.query = {
     if (!point || !Array.isArray(point) || point.length !== 2) {
       throw new Error("Invalid coordinates. Must be [longitude, latitude]");
     }
-
     if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
       throw new Error(
         "Invalid coordinates. Longitude must be -180 to 180, latitude -90 to 90",
@@ -1032,35 +1015,28 @@ tourSchema.query = {
       spherical: true,
     });
   },
-
   withinBox(southWest, northEast) {
     return this.where("location.coordinates").within({
       box: [southWest, northEast],
     });
   },
-
   withinPolygon(polygon) {
     return this.where("location.coordinates").within({
       polygon,
     });
   },
-
   byCity(city) {
     return this.where("location.city").equals(city);
   },
-
   byCountry(country) {
     return this.where("location.country").equals(country);
   },
-
   byRegion(region) {
     return this.where("location.region").equals(region);
   },
-
   hasMultipleLocations() {
     return this.where("locations.0").exists(true);
   },
-
   locationCount(min = 1, max = null) {
     let query = this.where("locations").size(min);
 
@@ -1070,15 +1046,12 @@ tourSchema.query = {
 
     return query;
   },
-
   byLocationActivity(activity) {
     return this.where("locations.activities").in([activity]);
   },
-
   byLocationAccommodation(accommodation) {
     return this.where("locations.accommodation").equals(accommodation);
   },
-
   withGeoFence() {
     return this.where("geoFence.radius").gt(0);
   },
@@ -1088,19 +1061,15 @@ tourSchema.query = {
 
     return this;
   },
-
   onlySecret() {
     return this.where("isSecret").equals(true);
   },
-
   bySecretAccessLevel(level) {
     return this.where("secretAccessLevel").equals(level);
   },
-
   bySecretCode(code) {
     return this.where("secretCode").equals(code);
   },
-
   secretAvailable() {
     const now = new Date();
 
@@ -1113,51 +1082,40 @@ tourSchema.query = {
       .where("secretBookings")
       .lt(this.where("secretMaxBookings"));
   },
-
   byWhitelistedUser(userId) {
     return this.where("secretWhitelist.userId").equals(userId);
   },
-
   secretReleaseDateRange(start, end) {
     return this.where("secretReleaseDate").gte(start).lte(end);
   },
-
   secretExpiryDateRange(start, end) {
     return this.where("secretExpiryDate").gte(start).lte(end);
   },
-
   hasRemainingSlots() {
     return this.where("secretBookings").lt(this.where("secretMaxBookings"));
   },
-
   sortBySecretAvailability() {
     return this.sort({ secretRemainingSlots: -1 });
   },
-
   sortBySecretReleaseDate(asc = true) {
     return this.sort({ secretReleaseDate: asc ? 1 : -1 });
   },
-
   selectSecretFields() {
     return this.select(
       "isSecret secretCode secretAccessLevel secretReleaseDate secretExpiryDate secretMaxBookings secretBookings secretWhitelist secretViewCount secretMetadata",
     );
   },
-
   excludeSecret() {
     return this.where("isSecret").equals(false);
   },
-
   byCreator(userId) {
     return this.where("createdBy").equals(userId);
   },
-
   accessibleBy(userId) {
     return this.where({
       $or: [{ createdBy: userId }, { guides: userId }],
     });
   },
-
   sortByDistance(point) {
     const [lng, lat] = point;
 
@@ -1191,19 +1149,15 @@ tourSchema.query = {
       { $sort: { distance: 1 } },
     ]);
   },
-
   sortByLocationCount(asc = false) {
     return this.sort({ locationCount: asc ? 1 : -1 });
   },
-
   sortByGuideCount(asc = false) {
     return this.sort({ guideCount: asc ? 1 : -1 });
   },
-
   sortByGuideRating(asc = false) {
     return this.sort({ "guideDetails.performance.rating": asc ? 1 : -1 });
   },
-
   sortByGuideExperience(asc = false) {
     return this.sort({
       "guideDetails.requirements.minGuideExperience": asc ? 1 : -1,
@@ -1223,11 +1177,9 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
       if (!this.secretAccessLevel || this.secretAccessLevel === "public") {
         this.secretAccessLevel = "vip";
       }
-
       if (!this.secretMaxBookings || this.secretMaxBookings < 1) {
         this.secretMaxBookings = 10;
       }
-
       if (!this.secretExpiryDate) {
         const defaultExpiry = new Date();
 
@@ -1242,11 +1194,9 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
       if (minGuides && maxGuides && minGuides > maxGuides) {
         throw new Error("Minimum guides cannot be greater than maximum guides");
       }
-
       if (this.guides && minGuides && this.guides.length < minGuides) {
         throw new Error(`Tour requires at least ${minGuides} guides`);
       }
-
       if (this.guides && maxGuides && this.guides.length > maxGuides) {
         throw new Error(`Tour cannot have more than ${maxGuides} guides`);
       }
@@ -1265,7 +1215,6 @@ tourSchema.pre("save", function preSaveMiddleware(next) {
             `Guide ${assignment.guideId} must be assigned to the tour`,
           );
         }
-
         if (
           assignment.startDate &&
           assignment.endDate &&
@@ -1321,15 +1270,12 @@ tourSchema.pre("find", function preFindMiddleware(next) {
     if (!this._skipActiveFilter) {
       this.where("isActive").equals(true);
     }
-
     if (!this._includeSecret && !this._skipSecretFilter) {
       this.where("isSecret").equals(false);
     }
-
     if (!this._sort) {
       this.sort({ createdAt: -1 });
     }
-
     next();
   } catch (error) {
     next(error);
@@ -1360,11 +1306,9 @@ tourSchema.pre("findOne", function preFindOneMiddleware(next) {
     if (!this._skipActiveFilter) {
       this.where("isActive").equals(true);
     }
-
     if (!this._includeSecret && !this._skipSecretFilter) {
       this.where("isSecret").equals(false);
     }
-
     next();
   } catch (error) {
     next(error);
@@ -1396,11 +1340,9 @@ tourSchema.pre("count", function preCountMiddleware(next) {
     if (!this._skipActiveFilter) {
       this.where("isActive").equals(true);
     }
-
     if (!this._includeSecret && !this._skipSecretFilter) {
       this.where("isSecret").equals(false);
     }
-
     next();
   } catch (error) {
     next(error);
@@ -1412,11 +1354,9 @@ tourSchema.pre("findById", function preFindByIdMiddleware(next) {
     if (!this._skipActiveFilter) {
       this.where("isActive").equals(true);
     }
-
     if (!this._includeSecret && !this._skipSecretFilter) {
       this.where("isSecret").equals(false);
     }
-
     next();
   } catch (error) {
     next(error);
@@ -1485,7 +1425,6 @@ tourSchema.index({ secretReleaseDate: 1 });
 tourSchema.index({ secretExpiryDate: 1 });
 tourSchema.index({ secretWhitelist: 1 });
 tourSchema.index({ secretBookings: 1, secretMaxBookings: 1 });
-
 tourSchema.index({ isSecret: 1, secretAccessLevel: 1 });
 tourSchema.index({ isSecret: 1, secretReleaseDate: 1, secretExpiryDate: 1 });
 tourSchema.index({ isSecret: 1, secretBookings: 1, secretMaxBookings: 1 });
@@ -1497,7 +1436,6 @@ tourSchema.index({ startDates: 1 });
 tourSchema.index({ difficulty: 1 });
 tourSchema.index({ duration: 1 });
 tourSchema.index({ name: "text", summary: "text", description: "text" });
-
 tourSchema.index({ category: 1 });
 tourSchema.index({ featured: 1, ratingsAverage: -1 });
 tourSchema.index({ isActive: 1, createdAt: -1 });
@@ -1514,7 +1452,6 @@ tourSchema.index({ "guideDetails.compensation.type": 1 });
 tourSchema.index({ "guideDetails.scheduling.backupGuides": 1 });
 tourSchema.index({ "guideRatings.guideId": 1 });
 tourSchema.index({ "itinerary.assignedGuides.guideId": 1 });
-
 tourSchema.index({ guides: 1, isActive: 1 });
 tourSchema.index({ "guideDetails.leadGuide": 1, isActive: 1 });
 tourSchema.index({ guides: 1, startDates: 1 });
@@ -1522,28 +1459,23 @@ tourSchema.index({ "guideDetails.leadGuide": 1, startDates: 1 });
 
 tourSchema.index({ "location.coordinates": "2dsphere" });
 tourSchema.index({ "locations.coordinates": "2dsphere" });
-
 tourSchema.index(
   { "location.coordinates": "2dsphere", "locations.coordinates": "2dsphere" },
   { sparse: true },
 );
-
 tourSchema.index({ "location.city": 1 });
 tourSchema.index({ "location.country": 1 });
 tourSchema.index({ "location.region": 1 });
 tourSchema.index({ "location.address": "text" });
-
 tourSchema.index({ "locations.city": 1 });
 tourSchema.index({ "locations.country": 1 });
 tourSchema.index({ "locations.region": 1 });
 tourSchema.index({ "locations.address": "text" });
-
 tourSchema.index({ "geoFence.radius": 1 });
 
 tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
 tourSchema.index({ category: 1, price: 1, duration: 1 });
 tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
-
 tourSchema.index({
   "location.coordinates": "2dsphere",
   price: 1,
@@ -1554,18 +1486,14 @@ tourSchema.index({
   price: 1,
   ratingsAverage: -1,
 });
-
 tourSchema.index({ "location.coordinates": "2dsphere", category: 1 });
 tourSchema.index({ "locations.coordinates": "2dsphere", category: 1 });
-
 tourSchema.index({ "location.coordinates": "2dsphere", difficulty: 1 });
 tourSchema.index({ "locations.coordinates": "2dsphere", difficulty: 1 });
-
 tourSchema.index({ createdBy: 1 });
 tourSchema.index({ createdBy: 1, isActive: 1 });
 tourSchema.index({ guides: 1 });
 tourSchema.index({ guides: 1, isActive: 1 });
-
 tourSchema.index({ createdBy: 1, isActive: 1, createdAt: -1 });
 tourSchema.index({ guides: 1, isActive: 1, createdAt: -1 });
 
@@ -1683,6 +1611,100 @@ tourSchema.methods.populateGuides = async function populateGuides() {
     .populate("itinerary.assignedGuides.guideId");
 
   return this;
+};
+
+/**
+ * Populate reviews for this tour
+ * @param {Object} options - Population options
+ * @param {string} options.type - 'approved', 'all', 'recent', 'top'
+ * @param {number} options.limit - Limit for 'recent' type
+ * @param {number} options.skip - Skip for pagination
+ * @param {string} options.sort - Sort order
+ */
+tourSchema.methods.populateReviews = async function populateReviews(
+  options = {},
+) {
+  const {
+    type = "approved",
+    limit = 10,
+    skip = 0,
+    sort = "-createdAt",
+    populateUser = true,
+    populateTour = false,
+  } = options;
+
+  let virtualField = "reviews";
+
+  if (type === "all") virtualField = "allReviews";
+  else if (type === "recent") virtualField = "recentReviews";
+  else if (type === "top") virtualField = "topReviews";
+
+  let query = this.populate({
+    path: virtualField,
+    options: {
+      limit,
+      skip,
+      sort,
+    },
+  });
+
+  if (populateUser) {
+    query = query.populate({
+      path: `${virtualField}.user`,
+      select: "name email profileImage role bio",
+    });
+  }
+
+  if (populateTour && type !== "all") {
+    query = query.populate({
+      path: `${virtualField}.tour`,
+      select: "name slug price duration difficulty imageCover",
+    });
+  }
+
+  await query;
+
+  return this;
+};
+
+/**
+ * Get paginated reviews for this tour
+ */
+tourSchema.methods.getPaginatedReviews = async function getPaginatedReviews(
+  page = 1,
+  limit = 10,
+  sort = "-createdAt",
+) {
+  const skip = (page - 1) * limit;
+
+  await this.populate({
+    path: "reviews",
+    options: {
+      limit,
+      skip,
+      sort,
+    },
+    populate: [
+      {
+        path: "user",
+        select: "name email profileImage role bio",
+      },
+    ],
+  });
+
+  const Review = mongoose.model("Review");
+  const total = await Review.countDocuments({
+    tour: this._id,
+    status: "approved",
+  });
+
+  return {
+    reviews: this.reviews || [],
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    limit,
+  };
 };
 
 tourSchema.methods.getGeoJSON = function getGeoJSON() {
