@@ -7,7 +7,7 @@ import {
   deleteMany,
   restoreOne,
   permanentDeleteOne,
-} from "../utils/factoryHandlers.js";
+} from "../utils/handlerFactory.js";
 
 const POPULATION_CONFIG = {
   user: {
