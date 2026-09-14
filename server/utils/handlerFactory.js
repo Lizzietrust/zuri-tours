@@ -65,6 +65,7 @@ export const deleteOne = (Model, options = {}) => {
       } else {
         populatedQuery.populate(populateOptions);
       }
+
       populatedDoc = await populatedQuery.lean();
     }
 
@@ -661,6 +662,291 @@ export const updateMany = (Model, options = {}) => {
 };
 
 /* ============================================================
+   READ FACTORY FUNCTIONS
+   ============================================================ */
+
+/**
+ * Factory function to get a single document
+ */
+export const getOne = (Model, options = {}) => {
+  const {
+    modelName = Model.modelName || "Document",
+    idParam = "id",
+    lookupField = "_id",
+    conditions = {},
+    populateOptions = null,
+    beforeQuery = null,
+    afterQuery = null,
+    checkAccess = null,
+    select = null,
+    lean = true,
+    allowSlug = false,
+    slugField = "slug",
+  } = options;
+
+  return catchAsync(async (req, res, next) => {
+    const identifier = req.params[idParam];
+
+    if (!identifier) {
+      return next(new AppError(`No ${modelName} identifier provided`, 400));
+    }
+
+    const isMongoId = /^[0-9a-fA-F]{24}$/.test(identifier);
+    const filter = { ...conditions };
+
+    if (allowSlug && !isMongoId) {
+      filter[slugField] = identifier;
+    } else {
+      filter[lookupField] = identifier;
+    }
+
+    let query = Model.findOne(filter);
+
+    if (select) {
+      query = query.select(select);
+    }
+
+    if (populateOptions) {
+      const popOpts =
+        typeof populateOptions === "function"
+          ? await populateOptions(req)
+          : populateOptions;
+
+      const popArray = Array.isArray(popOpts) ? popOpts : [popOpts];
+
+      popArray.forEach((opt) => {
+        query = query.populate(opt);
+      });
+    }
+
+    if (beforeQuery) {
+      query = (await beforeQuery(query, req, res)) || query;
+    }
+
+    let doc = lean ? await query.lean() : await query;
+
+    if (!doc) {
+      return next(new AppError(`${modelName} not found`, 404));
+    }
+
+    if (checkAccess) {
+      await checkAccess(doc, req, res);
+    }
+
+    if (afterQuery) {
+      doc = (await afterQuery(doc, req, res)) || doc;
+    }
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `${modelName} fetched successfully`,
+      doc,
+    );
+  });
+};
+
+/**
+ * Factory function to get multiple documents
+ */
+export const getAll = (Model, options = {}) => {
+  const {
+    modelName = Model.modelName || "Document",
+    conditions = {},
+    searchFields = [],
+    allowedFilters = [],
+    allowedSorts = [],
+    defaultSort = { createdAt: -1 },
+    defaultLimit = 10,
+    maxLimit = 100,
+    defaultSelect = null,
+    populateOptions = null,
+    beforeQuery = null,
+    afterQuery = null,
+    transformFilter = null,
+    lean = true,
+    resourceKey = `${(Model.modelName || "item").toLowerCase()}s`,
+  } = options;
+
+  return catchAsync(async (req, res) => {
+    let filter = { ...conditions };
+
+    if (allowedFilters.length > 0) {
+      allowedFilters.forEach((field) => {
+        if (req.query[field] !== undefined) {
+          filter[field] = req.query[field];
+        }
+      });
+    } else {
+      const excluded = [
+        "page",
+        "sort",
+        "limit",
+        "fields",
+        "search",
+        "populate",
+        "select",
+      ];
+
+      Object.keys(req.query).forEach((key) => {
+        if (!excluded.includes(key)) {
+          filter[key] = req.query[key];
+        }
+      });
+    }
+
+    if (transformFilter) {
+      filter = await transformFilter(filter, req);
+    }
+
+    if (req.query.search && searchFields.length > 0) {
+      const searchTerm = req.query.search.trim();
+      const searchConditions = {
+        $or: searchFields.map((field) => ({
+          [field]: { $regex: searchTerm, $options: "i" },
+        })),
+      };
+
+      filter = { $and: [filter, searchConditions] };
+    }
+
+    let query = Model.find(filter);
+
+    if (req.query.fields) {
+      const fields = req.query.fields.split(",").join(" ");
+
+      query = query.select(fields);
+    } else if (defaultSelect) {
+      query = query.select(defaultSelect);
+    }
+
+    let sort = defaultSort;
+
+    if (req.query.sort) {
+      const requestedSort = req.query.sort.split(",").join(" ");
+
+      if (allowedSorts.length > 0) {
+        const sortField = req.query.sort.replace("-", "").split(",")[0];
+
+        if (allowedSorts.includes(sortField)) {
+          sort = requestedSort;
+        }
+      } else {
+        sort = requestedSort;
+      }
+    }
+
+    query = query.sort(sort);
+
+    if (populateOptions) {
+      const popOpts =
+        typeof populateOptions === "function"
+          ? await populateOptions(req)
+          : populateOptions;
+
+      const popArray = Array.isArray(popOpts) ? popOpts : [popOpts];
+
+      popArray.forEach((opt) => {
+        query = query.populate(opt);
+      });
+    }
+
+    if (beforeQuery) {
+      query = (await beforeQuery(query, req, res)) || query;
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      maxLimit,
+      Math.max(1, parseInt(req.query.limit, 10) || defaultLimit),
+    );
+    const skip = (page - 1) * limit;
+
+    query = query.skip(skip).limit(limit);
+
+    let docs = lean ? await query.lean() : await query;
+
+    if (afterQuery) {
+      docs = (await afterQuery(docs, req, res)) || docs;
+    }
+
+    const total = await Model.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `${modelName}s fetched successfully`,
+      { [resourceKey]: docs },
+      {
+        results: docs.length,
+        total,
+        page,
+        pages: totalPages,
+        limit,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    );
+  });
+};
+
+/**
+ * Factory function for aggregation-based stats
+ */
+export const getStats = (Model, options = {}) => {
+  const {
+    modelName = Model.modelName || "Document",
+    buildPipeline,
+    beforeAggregate = null,
+    transformResult = null,
+    multiple = false,
+    resultKey = "stats",
+  } = options;
+
+  if (!buildPipeline) {
+    throw new Error(
+      `getStats for ${modelName} requires a "buildPipeline" function.`,
+    );
+  }
+
+  return catchAsync(async (req, res, next) => {
+    let ModelToUse = Model;
+
+    if (beforeAggregate) {
+      ModelToUse = (await beforeAggregate(Model, req, res)) || Model;
+    }
+
+    const pipeline = await buildPipeline(req);
+
+    if (!Array.isArray(pipeline)) {
+      return next(
+        new AppError(
+          `Aggregation pipeline for ${modelName} must be an array`,
+          500,
+        ),
+      );
+    }
+
+    const result = await ModelToUse.aggregate(pipeline);
+
+    let finalResult = multiple ? result : result[0] || null;
+
+    if (transformResult) {
+      finalResult =
+        (await transformResult(finalResult, req, res)) || finalResult;
+    }
+
+    return sendSuccessResponse(
+      res,
+      200,
+      `${modelName} statistics fetched successfully`,
+      { [resultKey]: finalResult },
+    );
+  });
+};
+
+/* ============================================================
    DEFAULT EXPORT
    ============================================================ */
 
@@ -673,4 +959,7 @@ export default {
   createOne,
   updateOne,
   updateMany,
+  getOne,
+  getAll,
+  getStats,
 };
