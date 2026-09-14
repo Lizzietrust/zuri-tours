@@ -9,6 +9,8 @@ import {
   permanentDeleteOne,
   createOne,
   updateOne,
+  getAll,
+  getOne,
 } from "../utils/handlerFactory.js";
 
 /* ============================================================
@@ -96,58 +98,6 @@ const populateReviewFields = (query, populateOptions = {}) => {
   }
 
   return populatedQuery;
-};
-
-const buildPopulationOptions = (parsedOptions, userRole = null) => {
-  const options = {
-    populateUser: parsedOptions.populateUser,
-    populateTour: parsedOptions.populateTour,
-    populateResponseUser: parsedOptions.populateResponseUser,
-    populateAttachments: parsedOptions.populateAttachments,
-    populateAll: parsedOptions.populateAll,
-    customPopulations: [],
-  };
-
-  if (userRole === "admin") {
-    options.populateFlagUsers = parsedOptions.populateFlagUsers || true;
-    options.populateEditHistory = parsedOptions.populateEditHistory || true;
-  } else {
-    options.populateFlagUsers = false;
-    options.populateEditHistory = false;
-  }
-
-  if (
-    parsedOptions.userFields &&
-    parsedOptions.userFields !== "name email profileImage role"
-  ) {
-    options.customPopulations.push({
-      path: "user",
-      select: parsedOptions.userFields,
-    });
-  }
-
-  if (
-    parsedOptions.tourFields &&
-    parsedOptions.tourFields !==
-      "name slug price duration difficulty imageCover"
-  ) {
-    options.customPopulations.push({
-      path: "tour",
-      select: parsedOptions.tourFields,
-    });
-  }
-
-  if (
-    parsedOptions.responseUserFields &&
-    parsedOptions.responseUserFields !== "name email role profileImage"
-  ) {
-    options.customPopulations.push({
-      path: "response.respondedBy",
-      select: parsedOptions.responseUserFields,
-    });
-  }
-
-  return options;
 };
 
 /* ============================================================
@@ -349,175 +299,145 @@ const updateReview = updateOne(Review, {
   },
 });
 
-const getAllReviews = catchAsync(async (req, res) => {
-  const tourId = req.params.tourId || req.query.tourId;
-  const {
-    page = 1,
-    limit = 10,
-    sort = "-createdAt",
-    status = "approved",
-    minRating,
-    maxRating,
-    populateAll = "false",
-    populateUser = "true",
-    populateTour = "true",
-    populateResponseUser = "false",
-    populateAttachments = "false",
-    userFields,
-    tourFields,
-    responseUserFields,
-  } = req.query;
+/* ============================================================
+   READ FACTORY HANDLERS
+   ============================================================ */
 
-  const query = {};
+const getAllReviews = getAll(Review, {
+  modelName: "Review",
+  searchFields: ["review", "title"],
+  allowedFilters: ["tour", "user", "status", "rating"],
+  allowedSorts: [
+    "createdAt",
+    "rating",
+    "helpfulCount",
+    "isVerifiedPurchase",
+    "isRecommended",
+  ],
+  defaultSort: { createdAt: -1 },
+  defaultLimit: 10,
+  maxLimit: 100,
+  resourceKey: "reviews",
 
-  if (tourId) {
-    query.tour = tourId;
-  }
+  transformFilter: (filter, req) => {
+    const tourId = req.params.tourId || req.query.tourId;
+    const { minRating, maxRating, status } = req.query;
 
-  let reviewQuery = Review.find(query);
+    const newFilter = { ...filter };
 
-  if (status) {
-    if (req.user && req.user.role === "admin") {
-      if (status !== "all") {
-        reviewQuery = reviewQuery.where("status").equals(status);
-      }
-    } else {
-      reviewQuery = reviewQuery.where("status").equals("approved");
+    if (tourId) newFilter.tour = tourId;
+
+    if (minRating || maxRating) {
+      newFilter.rating = {};
+      if (minRating) newFilter.rating.$gte = parseFloat(minRating);
+      if (maxRating) newFilter.rating.$lte = parseFloat(maxRating);
     }
-  } else if (!req.user || req.user.role !== "admin") {
-    reviewQuery = reviewQuery.where("status").equals("approved");
-  }
 
-  if (minRating) {
-    reviewQuery = reviewQuery.where("rating").gte(parseFloat(minRating));
-  }
+    const isAdmin = req.user?.role === "admin";
 
-  if (maxRating) {
-    reviewQuery = reviewQuery.where("rating").lte(parseFloat(maxRating));
-  }
+    if (!isAdmin) {
+      newFilter.status = "approved";
+    } else if (status && status !== "all") {
+      newFilter.status = status;
+    } else if (!status) {
+      delete newFilter.status;
+    }
 
-  const sortOptions = {
-    "-createdAt": { createdAt: -1 },
-    createdAt: { createdAt: 1 },
-    "-rating": { rating: -1 },
-    rating: { rating: 1 },
-    "-helpfulCount": { helpfulCount: -1 },
-    helpfulCount: { helpfulCount: 1 },
-    "-isVerifiedPurchase": { isVerifiedPurchase: -1 },
-    isVerifiedPurchase: { isVerifiedPurchase: 1 },
-    "-isRecommended": { isRecommended: -1 },
-    isRecommended: { isRecommended: 1 },
-  };
+    delete newFilter.minRating;
+    delete newFilter.maxRating;
 
-  reviewQuery = reviewQuery.sort(sortOptions[sort] || { createdAt: -1 });
+    return newFilter;
+  },
 
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
+  populateOptions: (req) => {
+    const popOpts = [
+      {
+        path: "user",
+        select: "name email profileImage role bio",
+      },
+      {
+        path: "tour",
+        select:
+          "name slug price duration difficulty imageCover ratingsAverage ratingsQuantity",
+      },
+    ];
 
-  reviewQuery = reviewQuery.skip(skip).limit(limitNum);
+    if (req.user?.role === "admin") {
+      popOpts.push({
+        path: "flagReasons.flaggedBy",
+        select: "name email role",
+      });
+      popOpts.push({
+        path: "editHistory.editedBy",
+        select: "name email role",
+      });
+    }
 
-  const parsedOptions = {
-    populateAll,
-    populateUser,
-    populateTour,
-    populateResponseUser,
-    populateAttachments,
-    populateFlagUsers: "false",
-    populateEditHistory: "false",
-    userFields,
-    tourFields,
-    responseUserFields,
-  };
+    return popOpts;
+  },
 
-  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
+  afterQuery: (docs, req) => {
+    if (req.user?.role !== "admin") {
+      return docs.map((doc) => {
+        const copy = { ...doc };
 
-  reviewQuery = populateReviewFields(reviewQuery, popOptions);
+        delete copy.flagReasons;
+        delete copy.editHistory;
 
-  const reviews = await reviewQuery.lean();
+        return copy;
+      });
+    }
 
-  let countQuery = Review.find(query);
-
-  if (!req.user || req.user.role !== "admin") {
-    countQuery = countQuery.where("status").equals("approved");
-  }
-
-  const total = await countQuery.countDocuments();
-
-  res.status(200).json({
-    status: "success",
-    results: reviews.length,
-    total,
-    page: pageNum,
-    pages: Math.ceil(total / limitNum),
-    data: { reviews },
-  });
+    return docs;
+  },
 });
 
-const getReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const {
-    populateAll = "true",
-    populateUser = "true",
-    populateTour = "true",
-    populateResponseUser = "true",
-    populateAttachments = "true",
-    userFields,
-    tourFields,
-    responseUserFields,
-  } = req.query;
+const getReview = getOne(Review, {
+  modelName: "Review",
+  conditions: {},
+  checkAccess: (doc, req) => {
+    if (doc.status === "approved") return;
 
-  let query = Review.findById(id);
+    if (!req.user) {
+      throw new AppError("Review is not available", 404);
+    }
 
-  const parsedOptions = {
-    populateAll,
-    populateUser,
-    populateTour,
-    populateResponseUser,
-    populateAttachments,
-    populateFlagUsers: "true",
-    populateEditHistory: "true",
-    userFields,
-    tourFields,
-    responseUserFields,
-  };
-
-  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
-
-  query = populateReviewFields(query, popOptions);
-
-  const review = await query.lean();
-
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
-
-  if (review.status !== "approved" && !req.user) {
-    throw new AppError("Review is not available", 404);
-  }
-
-  if (review.status !== "approved" && req.user) {
-    const isOwner = review.user._id.toString() === req.user._id.toString();
+    const isOwner = doc.user?._id?.toString() === req.user._id.toString();
     const isAdmin = req.user.role === "admin";
     const isTourCreator =
-      review.tour &&
-      review.tour.createdBy &&
-      review.tour.createdBy.toString() === req.user._id.toString();
+      doc.tour?.createdBy &&
+      doc.tour.createdBy.toString() === req.user._id.toString();
 
     if (!isOwner && !isAdmin && !isTourCreator) {
       throw new AppError("Review is not available", 404);
     }
-  }
+  },
+  populateOptions: (req) => {
+    const popOpts = [
+      { path: "user", select: "name email profileImage role bio" },
+      {
+        path: "tour",
+        select:
+          "name slug price duration difficulty imageCover ratingsAverage ratingsQuantity createdBy",
+      },
+      { path: "response.respondedBy", select: "name email role profileImage" },
+      { path: "attachments", select: "url type caption uploadedAt" },
+    ];
 
-  res.status(200).json({
-    status: "success",
-    data: { review },
-  });
+    if (req.user?.role === "admin") {
+      popOpts.push({
+        path: "flagReasons.flaggedBy",
+        select: "name email role",
+      });
+      popOpts.push({
+        path: "editHistory.editedBy",
+        select: "name email role",
+      });
+    }
+
+    return popOpts;
+  },
 });
-
-/* ============================================================
-   OTHER HANDLERS (unchanged)
-   ============================================================ */
 
 const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
@@ -803,9 +723,7 @@ const getTourReviews = catchAsync(async (req, res) => {
     userFields,
   };
 
-  const popOptions = buildPopulationOptions(parsedOptions);
-
-  query = populateReviewFields(query, popOptions);
+  query = populateReviewFields(query, parsedOptions);
 
   const reviews = await query.lean();
 
@@ -860,9 +778,7 @@ const getMyReviews = catchAsync(async (req, res) => {
     tourFields,
   };
 
-  const popOptions = buildPopulationOptions(parsedOptions, req.user?.role);
-
-  query = populateReviewFields(query, popOptions);
+  query = populateReviewFields(query, parsedOptions);
 
   const reviews = await query.lean();
 
@@ -917,8 +833,7 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
         userFields,
       };
 
-      const popOptions = buildPopulationOptions(parsedOptions);
-      const reviews = await populateReviewFields(query, popOptions).lean();
+      const reviews = await populateReviewFields(query, parsedOptions).lean();
 
       return {
         tourId,
