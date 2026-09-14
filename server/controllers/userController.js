@@ -7,6 +7,7 @@ import {
   sendNotFoundResponse,
   sendValidationErrorResponse,
 } from "../utils/responseHelper.js";
+import { AppError } from "../utils/appError.js";
 import {
   deleteOne,
   deleteMany,
@@ -18,7 +19,6 @@ import {
   getAll,
   getOne,
 } from "../utils/handlerFactory.js";
-import { AppError } from "../utils/appError.js";
 
 /* ============================================================
    SHARED SELECTS / CONSTANTS
@@ -815,6 +815,180 @@ const searchUsers = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   /me ENDPOINTS (current authenticated user)
+   ============================================================ */
+
+/**
+ * Fields a user is allowed to update on their own profile.
+ * Sensitive fields (password, role, email, tokens, etc.) are
+ * explicitly excluded.
+ */
+const ALLOWED_ME_UPDATE_FIELDS = [
+  "name",
+  "photo",
+  "profileImage",
+  "bio",
+  "phone",
+  "dateOfBirth",
+  "address",
+  "preferences",
+  "languages",
+  "expertise",
+];
+
+/**
+ * GET /users/me
+ * Returns the currently authenticated user's profile.
+ */
+const getMe = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id)
+    .select(SAFE_USER_SELECT)
+    .populate({
+      path: "assignedTours",
+      select: "name slug price duration difficulty ratingsAverage imageCover",
+    })
+    .populate({
+      path: "bookings.tour",
+      select: "name slug price duration difficulty imageCover startDates",
+    })
+    .lean();
+
+  if (!user) {
+    return next(new AppError("User not found", 404));
+  }
+
+  return sendSuccessResponse(res, 200, "Current user fetched successfully", {
+    user,
+  });
+});
+
+const updateMe = catchAsync(async (req, res, next) => {
+  if (req.body.password || req.body.passwordConfirm) {
+    return next(
+      new AppError(
+        "This route is not for password updates. Please use /updateMyPassword.",
+        400,
+      ),
+    );
+  }
+
+  if (req.body.role) {
+    return next(new AppError("You cannot change your own role", 403));
+  }
+
+  const filteredBody = {};
+
+  Object.keys(req.body).forEach((key) => {
+    if (ALLOWED_ME_UPDATE_FIELDS.includes(key)) {
+      filteredBody[key] = req.body[key];
+    }
+  });
+
+  if (Object.keys(filteredBody).length === 0) {
+    return next(
+      new AppError(
+        `No valid fields provided. Allowed fields: ${ALLOWED_ME_UPDATE_FIELDS.join(
+          ", ",
+        )}`,
+        400,
+      ),
+    );
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(req.user._id, filteredBody, {
+    new: true,
+    runValidators: true,
+  }).select(SAFE_USER_SELECT);
+
+  if (!updatedUser) {
+    return next(new AppError("User not found", 404));
+  }
+
+  return sendSuccessResponse(res, 200, "Profile updated successfully", {
+    user: updatedUser,
+  });
+});
+
+const deleteMe = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    return next(new AppError("User not found", 404));
+  }
+
+  user.accountDeleted = true;
+  user.accountDeletedAt = new Date();
+  user.isDeleted = true;
+  user.deletedAt = new Date();
+  user.deletedBy = req.user._id;
+
+  await user.save({ validateBeforeSave: false });
+
+  if (user.assignedTours && user.assignedTours.length > 0) {
+    await Tour.updateMany(
+      { _id: { $in: user.assignedTours } },
+      { $pull: { guides: user._id } },
+    );
+  }
+
+  return sendSuccessResponse(
+    res,
+    200,
+    "Account deleted successfully. We're sorry to see you go!",
+    null,
+  );
+});
+
+/**
+ * PATCH /users/me/password
+ * Updates the current user's password with current password verification.
+ */
+const updateMyPassword = catchAsync(async (req, res, next) => {
+  const { currentPassword, password, passwordConfirm } = req.body;
+
+  if (!currentPassword || !password || !passwordConfirm) {
+    return next(
+      new AppError(
+        "Please provide currentPassword, password, and passwordConfirm",
+        400,
+      ),
+    );
+  }
+
+  if (password !== passwordConfirm) {
+    return next(new AppError("Passwords do not match", 400));
+  }
+
+  const user = await User.findById(req.user._id).select("+password");
+
+  if (!user) {
+    return next(new AppError("User not found", 404));
+  }
+
+  const isCorrect = await user.correctPassword(currentPassword, user.password);
+
+  if (!isCorrect) {
+    return next(new AppError("Your current password is incorrect", 401));
+  }
+
+  user.password = password;
+  user.passwordConfirm = passwordConfirm;
+
+  if (typeof user.tokenVersion === "number") {
+    user.tokenVersion += 1;
+  }
+
+  await user.save();
+
+  return sendSuccessResponse(
+    res,
+    200,
+    "Password updated successfully. Please log in again.",
+    null,
+  );
+});
+
 export {
   deleteUser,
   permanentDeleteUser,
@@ -832,4 +1006,8 @@ export {
   getUsersWithStats,
   searchUsers,
   bulkUpdateUsers,
+  getMe,
+  updateMe,
+  deleteMe,
+  updateMyPassword,
 };
