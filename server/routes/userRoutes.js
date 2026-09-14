@@ -16,6 +16,10 @@ import {
   getUsersWithStats,
   searchUsers,
   bulkUpdateUsers,
+  getMe,
+  updateMe,
+  deleteMe,
+  updateMyPassword,
 } from "../controllers/userController.js";
 import {
   checkValidId,
@@ -33,17 +37,39 @@ import {
 
 const router = express.Router();
 
+/* ============================================================
+   PUBLIC ROUTES
+   ============================================================ */
+
 router.route("/").get(getAllUsers);
 
 router.route("/create").post(registerLimiter, validateUser, createUser);
 
 router.route("/search").get(protect, authorize("admin"), searchUsers);
 
+/* ============================================================
+   AUTHENTICATED ROUTES
+   ============================================================ */
+
 router.use(protect);
+
+/* ---------- /me ROUTES (must come before /:id) ---------- */
+
+router
+  .route("/me")
+  .get(getMe)
+  .patch(userUpdateLimiter, updateMe)
+  .delete(deleteMe);
+
+router.route("/me/password").patch(userUpdateLimiter, updateMyPassword);
+
+/* ---------- Nested user routes ---------- */
 
 router.route("/:userId/tours").get(checkValidId, getUserTours);
 router.route("/:userId/reviews").get(checkValidId, getUserReviews);
 router.route("/:userId/stats").get(checkValidId, getUserStats);
+
+/* ---------- Single user CRUD ---------- */
 
 router
   .route("/:id")
@@ -53,15 +79,17 @@ router
 
 router
   .route("/:id/restore")
-  .patch(protect, authorize("admin"), checkValidId, restoreUser);
+  .patch(authorize("admin"), checkValidId, restoreUser);
 
 router
   .route("/:id/permanent")
-  .delete(protect, authorize("admin"), checkValidId, permanentDeleteUser);
+  .delete(authorize("admin"), checkValidId, permanentDeleteUser);
 
-router
-  .route("/bulk/delete")
-  .delete(protect, authorize("admin"), bulkDeleteUsers);
+router.route("/bulk/delete").delete(authorize("admin"), bulkDeleteUsers);
+
+/* ============================================================
+   ADMIN-ONLY ROUTES
+   ============================================================ */
 
 router.use(authorize("admin"));
 
