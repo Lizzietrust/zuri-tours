@@ -12,6 +12,8 @@ import {
   cascadeDeleteOne,
   createOne,
   updateOne,
+  getAll,
+  getOne,
 } from "../utils/handlerFactory.js";
 
 const populateGuideFields = (query, populateOptions = {}) => {
@@ -124,56 +126,6 @@ const populateGuideFields = (query, populateOptions = {}) => {
   return populatedQuery;
 };
 
-const populateReviewVirtuals = (query, options = {}) => {
-  const {
-    populateReviews = true,
-    reviewType = "approved",
-    reviewLimit = 10,
-    reviewSort = "-createdAt",
-    populateReviewUsers = true,
-    populateReviewTour = false,
-    reviewsOnly = false,
-  } = options;
-
-  let populatedQuery = query;
-
-  if (!populateReviews) {
-    return populatedQuery;
-  }
-
-  let virtualField = "reviews";
-
-  if (reviewType === "all") virtualField = "allReviews";
-  else if (reviewType === "recent") virtualField = "recentReviews";
-  else if (reviewType === "top") virtualField = "topReviews";
-
-  if (!reviewsOnly) {
-    populatedQuery = populatedQuery.populate({
-      path: virtualField,
-      options: {
-        limit: reviewLimit,
-        sort: reviewSort,
-      },
-    });
-  }
-
-  if (populateReviewUsers && !reviewsOnly) {
-    populatedQuery = populatedQuery.populate({
-      path: `${virtualField}.user`,
-      select: "name email profileImage role bio",
-    });
-  }
-
-  if (populateReviewTour && !reviewsOnly) {
-    populatedQuery = populatedQuery.populate({
-      path: `${virtualField}.tour`,
-      select: "name slug price duration difficulty imageCover",
-    });
-  }
-
-  return populatedQuery;
-};
-
 const deleteTour = cascadeDeleteOne(Tour, {
   modelName: "Tour",
   idParam: "id",
@@ -246,136 +198,305 @@ const bulkDeleteTours = deleteMany(Tour, {
   },
 });
 
-const getAllTours = catchAsync(async (req, res) => {
-  const { tours, pagination, count } =
-    await TourQueryService.executePaginatedQuery(req.query);
+const getAllTours = getAll(Tour, {
+  modelName: "Tour",
+  searchFields: ["name", "summary", "description", "location"],
+  allowedFilters: ["difficulty", "price", "ratingsAverage", "duration"],
+  allowedSorts: ["createdAt", "price", "ratingsAverage", "duration", "name"],
+  defaultSort: { createdAt: -1 },
+  defaultLimit: 10,
+  maxLimit: 100,
+  resourceKey: "tours",
 
-  const populateAll = req.query.populateAll === "true";
-  const populateGuides = req.query.populateGuides !== "false";
-  const populateLeadGuide = req.query.populateLeadGuide !== "false";
-  const populateAssistantGuides = req.query.populateAssistantGuides === "true";
-  const populateGuideAssignments =
-    req.query.populateGuideAssignments === "true";
-  const populateGuideRatings = req.query.populateGuideRatings === "true";
+  transformFilter: (filter, req) => {
+    const { minPrice, maxPrice, minRating, maxRating, startDate, endDate } =
+      req.query;
 
-  const populateReviews = req.query.populateReviews !== "false";
-  const reviewType = req.query.reviewType || "approved";
-  const reviewLimit = parseInt(req.query.reviewLimit, 10) || 3;
-  const reviewSort = req.query.reviewSort || "-createdAt";
-  const populateReviewUsers = req.query.populateReviewUsers !== "false";
+    const newFilter = { ...filter };
 
-  const tourIds = tours.map((tour) => tour._id);
+    if (minPrice || maxPrice) {
+      newFilter.price = {};
+      if (minPrice) newFilter.price.$gte = parseInt(minPrice, 10);
+      if (maxPrice) newFilter.price.$lte = parseInt(maxPrice, 10);
+    }
 
-  let query = Tour.find({ _id: { $in: tourIds } });
+    if (minRating || maxRating) {
+      newFilter.ratingsAverage = {};
+      if (minRating) newFilter.ratingsAverage.$gte = parseFloat(minRating);
+      if (maxRating) newFilter.ratingsAverage.$lte = parseFloat(maxRating);
+    }
 
-  query = populateGuideFields(query, {
-    populateAll,
-    populateGuides,
-    populateLeadGuide,
-    populateAssistantGuides,
-    populateGuideAssignments,
-    populateGuideRatings,
-  });
+    if (startDate || endDate) {
+      newFilter.startDates = {};
+      if (startDate) newFilter.startDates.$gte = new Date(startDate);
+      if (endDate) newFilter.startDates.$lte = new Date(endDate);
+    }
 
-  query = populateReviewVirtuals(query, {
-    populateReviews,
-    reviewType,
-    reviewLimit,
-    reviewSort,
-    populateReviewUsers,
-  });
+    delete newFilter.minPrice;
+    delete newFilter.maxPrice;
+    delete newFilter.minRating;
+    delete newFilter.maxRating;
+    delete newFilter.startDate;
+    delete newFilter.endDate;
 
-  const populatedTours = await query.lean();
+    return newFilter;
+  },
 
-  res.status(200).json({
-    status: "success",
-    results: count,
-    pagination,
-    data: { tours: populatedTours },
-  });
+  populateOptions: (req) => {
+    const populateAll = req.query.populateAll === "true";
+    const populateGuides = req.query.populateGuides !== "false";
+    const populateLeadGuide = req.query.populateLeadGuide !== "false";
+    const populateAssistantGuides =
+      req.query.populateAssistantGuides === "true";
+    const populateGuideAssignments =
+      req.query.populateGuideAssignments === "true";
+    const populateGuideRatings = req.query.populateGuideRatings === "true";
+
+    const popOpts = [];
+
+    if (populateAll) {
+      popOpts.push({
+        path: "guides",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.leadGuide",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.assistantGuides",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.guideAssignments.guideId",
+        select: "name email role profileImage",
+      });
+      popOpts.push({
+        path: "guideRatings.guideId",
+        select: "name email profileImage",
+      });
+      popOpts.push({
+        path: "itinerary.assignedGuides.guideId",
+        select: "name email role profileImage",
+      });
+    } else {
+      if (populateGuides) {
+        popOpts.push({
+          path: "guides",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
+
+      if (populateLeadGuide) {
+        popOpts.push({
+          path: "guideDetails.leadGuide",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
+
+      if (populateAssistantGuides) {
+        popOpts.push({
+          path: "guideDetails.assistantGuides",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
+
+      if (populateGuideAssignments) {
+        popOpts.push({
+          path: "guideDetails.guideAssignments.guideId",
+          select: "name email role profileImage",
+        });
+      }
+
+      if (populateGuideRatings) {
+        popOpts.push({
+          path: "guideRatings.guideId",
+          select: "name email profileImage",
+        });
+      }
+    }
+
+    const populateReviews = req.query.populateReviews !== "false";
+
+    if (populateReviews) {
+      const reviewType = req.query.reviewType || "approved";
+      const reviewLimit = parseInt(req.query.reviewLimit, 10) || 3;
+      const reviewSort = req.query.reviewSort || "-createdAt";
+
+      let virtualField = "reviews";
+
+      if (reviewType === "all") virtualField = "allReviews";
+      else if (reviewType === "recent") virtualField = "recentReviews";
+      else if (reviewType === "top") virtualField = "topReviews";
+
+      popOpts.push({
+        path: virtualField,
+        options: { limit: reviewLimit, sort: reviewSort },
+        populate: {
+          path: "user",
+          select: "name email profileImage role bio",
+        },
+      });
+    }
+
+    return popOpts;
+  },
 });
 
 /**
  * Get a single tour by ID or slug
  */
-const getTour = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const isMongoId = id.match(/^[0-9a-fA-F]{24}$/);
+const getTour = getOne(Tour, {
+  modelName: "Tour",
+  allowSlug: true,
+  slugField: "slug",
+  conditions: {},
 
-  const populateAll = req.query.populateAll === "true";
-  const populateGuides = req.query.populateGuides !== "false";
-  const populateLeadGuide = req.query.populateLeadGuide !== "false";
-  const populateAssistantGuides = req.query.populateAssistantGuides === "true";
-  const populateGuideAssignments =
-    req.query.populateGuideAssignments === "true";
-  const populateGuideRatings = req.query.populateGuideRatings === "true";
-  const populateBackupGuides = req.query.populateBackupGuides === "true";
-  const populateReviewers = req.query.populateReviewers === "true";
-  const populateItineraryGuides = req.query.populateItineraryGuides === "true";
+  populateOptions: (req) => {
+    const populateAll = req.query.populateAll === "true";
+    const populateGuides = req.query.populateGuides !== "false";
+    const populateLeadGuide = req.query.populateLeadGuide !== "false";
+    const populateAssistantGuides =
+      req.query.populateAssistantGuides === "true";
+    const populateGuideAssignments =
+      req.query.populateGuideAssignments === "true";
+    const populateGuideRatings = req.query.populateGuideRatings === "true";
+    const populateBackupGuides = req.query.populateBackupGuides === "true";
+    const populateReviewers = req.query.populateReviewers === "true";
+    const populateItineraryGuides =
+      req.query.populateItineraryGuides === "true";
 
-  const populateReviews = req.query.populateReviews !== "false";
-  const reviewType = req.query.reviewType || "approved";
-  const reviewLimit = parseInt(req.query.reviewLimit, 10) || 10;
-  const reviewSort = req.query.reviewSort || "-createdAt";
-  const populateReviewUsers = req.query.populateReviewUsers !== "false";
-  const populateReviewTour = req.query.populateReviewTour === "true";
-  const reviewsOnly = req.query.reviewsOnly === "true";
+    const popOpts = [];
 
-  let query;
+    if (populateAll) {
+      popOpts.push({
+        path: "guides",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.leadGuide",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.assistantGuides",
+        select: "name email role profileImage bio languages expertise",
+      });
+      popOpts.push({
+        path: "guideDetails.guideAssignments.guideId",
+        select: "name email role profileImage",
+      });
+      popOpts.push({
+        path: "guideDetails.scheduling.backupGuides",
+        select: "name email role profileImage bio",
+      });
+      popOpts.push({
+        path: "guideRatings.guideId",
+        select: "name email profileImage",
+      });
+      popOpts.push({
+        path: "guideRatings.reviewerId",
+        select: "name email",
+      });
+      popOpts.push({
+        path: "itinerary.assignedGuides.guideId",
+        select: "name email role profileImage",
+      });
+    } else {
+      if (populateGuides) {
+        popOpts.push({
+          path: "guides",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
 
-  if (isMongoId) {
-    query = Tour.findById(id);
-  } else {
-    query = Tour.findOne({ slug: id });
-  }
+      if (populateLeadGuide) {
+        popOpts.push({
+          path: "guideDetails.leadGuide",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
 
-  query = populateGuideFields(query, {
-    populateAll,
-    populateGuides,
-    populateLeadGuide,
-    populateAssistantGuides,
-    populateGuideAssignments,
-    populateGuideRatings,
-    populateBackupGuides,
-    populateReviewers,
-    populateItineraryGuides,
-  });
+      if (populateAssistantGuides) {
+        popOpts.push({
+          path: "guideDetails.assistantGuides",
+          select: "name email role profileImage bio languages expertise",
+        });
+      }
 
-  query = populateReviewVirtuals(query, {
-    populateReviews,
-    reviewType,
-    reviewLimit,
-    reviewSort,
-    populateReviewUsers,
-    populateReviewTour,
-    reviewsOnly,
-  });
+      if (populateGuideAssignments) {
+        popOpts.push({
+          path: "guideDetails.guideAssignments.guideId",
+          select: "name email role profileImage",
+        });
+      }
 
-  const tour = await query.lean();
+      if (populateGuideRatings) {
+        popOpts.push({
+          path: "guideRatings.guideId",
+          select: "name email profileImage",
+        });
+      }
 
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
+      if (populateReviewers && populateGuideRatings) {
+        popOpts.push({
+          path: "guideRatings.reviewerId",
+          select: "name email",
+        });
+      }
 
-  if (req.user && req.user.role === "guide") {
-    const user = await User.findById(req.user._id);
-    const hasAccess = user.assignedTours.some(
-      (tourId) => tourId.toString() === tour._id.toString(),
-    );
+      if (populateBackupGuides) {
+        popOpts.push({
+          path: "guideDetails.scheduling.backupGuides",
+          select: "name email role profileImage bio",
+        });
+      }
 
-    if (
-      !hasAccess &&
-      req.user.role !== "lead-guide" &&
-      req.user.role !== "admin"
-    ) {
-      throw new AppError("You don't have access to this tour", 403);
+      if (populateItineraryGuides) {
+        popOpts.push({
+          path: "itinerary.assignedGuides.guideId",
+          select: "name email role profileImage",
+        });
+      }
     }
-  }
 
-  res.status(200).json({
-    status: "success",
-    data: { tour },
-  });
+    const populateReviews = req.query.populateReviews !== "false";
+
+    if (populateReviews) {
+      const reviewType = req.query.reviewType || "approved";
+      const reviewLimit = parseInt(req.query.reviewLimit, 10) || 10;
+      const reviewSort = req.query.reviewSort || "-createdAt";
+
+      let virtualField = "reviews";
+
+      if (reviewType === "all") virtualField = "allReviews";
+      else if (reviewType === "recent") virtualField = "recentReviews";
+      else if (reviewType === "top") virtualField = "topReviews";
+
+      popOpts.push({
+        path: virtualField,
+        options: { limit: reviewLimit, sort: reviewSort },
+        populate: {
+          path: "user",
+          select: "name email profileImage role bio",
+        },
+      });
+    }
+
+    return popOpts;
+  },
+
+  checkAccess: async (doc, req) => {
+    if (req.user && req.user.role === "guide") {
+      const user = await User.findById(req.user._id).select("assignedTours");
+      const hasAccess = user.assignedTours.some(
+        (tourId) => tourId.toString() === doc._id.toString(),
+      );
+
+      if (!hasAccess) {
+        throw new AppError("You don't have access to this tour", 403);
+      }
+    }
+  },
 });
 
 /**
