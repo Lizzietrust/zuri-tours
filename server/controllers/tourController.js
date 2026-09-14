@@ -10,6 +10,8 @@ import {
   restoreOne,
   permanentDeleteOne,
   cascadeDeleteOne,
+  createOne,
+  updateOne,
 } from "../utils/handlerFactory.js";
 
 const populateGuideFields = (query, populateOptions = {}) => {
@@ -379,88 +381,42 @@ const getTour = catchAsync(async (req, res) => {
 /**
  * Create a new tour
  */
-const createTour = catchAsync(async (req, res) => {
-  const tourData = {
-    ...req.body,
-    createdBy: req.user._id,
-  };
-
-  if (req.user.role === "lead-guide") {
-    tourData.guides = tourData.guides || [];
-    if (!tourData.guides.includes(req.user._id)) {
-      tourData.guides.push(req.user._id);
-    }
-
-    if (!tourData.guideDetails) {
-      tourData.guideDetails = {};
-    }
-    if (!tourData.guideDetails.leadGuide) {
-      tourData.guideDetails.leadGuide = req.user._id;
-    }
-  }
-
-  if (tourData.guideDetails && tourData.guideDetails.requirements) {
-    const { minGuides, maxGuides } = tourData.guideDetails.requirements;
-    const guideCount = tourData.guides ? tourData.guides.length : 0;
-
-    if (minGuides && guideCount < minGuides) {
-      throw new AppError(`Tour requires at least ${minGuides} guides`, 400);
-    }
-
-    if (maxGuides && guideCount > maxGuides) {
-      throw new AppError(`Tour cannot have more than ${maxGuides} guides`, 400);
-    }
-  }
-
-  const tour = await Tour.create(tourData);
-
-  if (tour.guides && tour.guides.length > 0) {
-    await User.updateMany(
-      { _id: { $in: tour.guides } },
-      { $addToSet: { assignedTours: tour._id } },
-    );
-  }
-
-  const populatedTour = await Tour.findById(tour._id)
-    .populate({
-      path: "guides",
-      select: "name email role profileImage bio",
-    })
-    .populate({
+const createTour = createOne(Tour, {
+  modelName: "Tour",
+  populateOptions: [
+    { path: "guides", select: "name email role profileImage bio" },
+    {
       path: "guideDetails.leadGuide",
       select: "name email role profileImage bio",
-    })
-    .populate({
+    },
+    {
       path: "guideDetails.assistantGuides",
       select: "name email role profileImage bio",
-    })
-    .populate({
+    },
+    {
       path: "reviews",
       options: { limit: 5, sort: "-createdAt" },
-      populate: {
-        path: "user",
-        select: "name email profileImage",
-      },
-    })
-    .lean();
+      populate: { path: "user", select: "name email profileImage" },
+    },
+  ],
+  beforeCreate: (data, req) => {
+    const tourData = { ...data, createdBy: req.user._id };
 
-  res.status(201).json({
-    status: "success",
-    data: { tour: populatedTour },
-  });
-});
+    if (req.user.role === "lead-guide") {
+      tourData.guides = tourData.guides || [];
+      if (!tourData.guides.includes(req.user._id)) {
+        tourData.guides.push(req.user._id);
+      }
 
-/**
- * Update a tour
- */
-const updateTour = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const updateData = { ...req.body };
+      if (!tourData.guideDetails) tourData.guideDetails = {};
+      if (!tourData.guideDetails.leadGuide) {
+        tourData.guideDetails.leadGuide = req.user._id;
+      }
+    }
 
-  if (updateData.guides) {
-    if (updateData.guideDetails && updateData.guideDetails.requirements) {
-      const { minGuides, maxGuides } = updateData.guideDetails.requirements;
-      const guideCount = updateData.guides.length;
+    if (tourData.guideDetails?.requirements) {
+      const { minGuides, maxGuides } = tourData.guideDetails.requirements;
+      const guideCount = tourData.guides ? tourData.guides.length : 0;
 
       if (minGuides && guideCount < minGuides) {
         throw new AppError(`Tour requires at least ${minGuides} guides`, 400);
@@ -474,80 +430,99 @@ const updateTour = catchAsync(async (req, res) => {
       }
     }
 
-    if (updateData.guideDetails && updateData.guideDetails.leadGuide) {
-      if (!updateData.guides.includes(updateData.guideDetails.leadGuide)) {
-        throw new AppError("Lead guide must be in the guides array", 400);
-      }
-    }
-  }
-
-  const tour = await Tour.findByIdAndUpdate(id, updateData, {
-    new: true,
-    runValidators: true,
-  });
-
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
-
-  if (updateData.guides) {
-    const currentTour = await Tour.findById(id);
-    const currentGuideIds = currentTour.guides.map((id) => id.toString());
-    const newGuideIds = updateData.guides.map((id) => id.toString());
-
-    const guidesToAdd = newGuideIds.filter(
-      (id) => !currentGuideIds.includes(id),
-    );
-    const guidesToRemove = currentGuideIds.filter(
-      (id) => !newGuideIds.includes(id),
-    );
-
-    if (guidesToAdd.length > 0) {
+    return tourData;
+  },
+  afterCreate: async (doc) => {
+    if (doc.guides && doc.guides.length > 0) {
       await User.updateMany(
-        { _id: { $in: guidesToAdd } },
-        { $addToSet: { assignedTours: tour._id } },
+        { _id: { $in: doc.guides } },
+        { $addToSet: { assignedTours: doc._id } },
       );
     }
+  },
+});
 
-    if (guidesToRemove.length > 0) {
-      await User.updateMany(
-        { _id: { $in: guidesToRemove } },
-        { $pull: { assignedTours: tour._id } },
-      );
-    }
-  }
-
-  const populatedTour = await Tour.findById(tour._id)
-    .populate({
+const updateTour = updateOne(Tour, {
+  modelName: "Tour",
+  populateOptions: [
+    {
       path: "guides",
       select: "name email role profileImage bio languages expertise",
-    })
-    .populate({
+    },
+    {
       path: "guideDetails.leadGuide",
       select: "name email role profileImage bio languages expertise",
-    })
-    .populate({
+    },
+    {
       path: "guideDetails.assistantGuides",
       select: "name email role profileImage bio languages expertise",
-    })
-    .populate({
+    },
+    {
       path: "guideDetails.guideAssignments.guideId",
       select: "name email role profileImage",
-    })
-    .populate({
+    },
+    {
       path: "reviews",
       options: { limit: 5, sort: "-createdAt" },
-      populate: {
-        path: "user",
-        select: "name email profileImage",
-      },
-    })
-    .lean();
+      populate: { path: "user", select: "name email profileImage" },
+    },
+  ],
+  beforeUpdate: (data) => {
+    if (data.guides) {
+      if (data.guideDetails?.requirements) {
+        const { minGuides, maxGuides } = data.guideDetails.requirements;
+        const guideCount = data.guides.length;
 
-  res.status(200).json({
-    status: "success",
-    data: { tour: populatedTour },
-  });
+        if (minGuides && guideCount < minGuides) {
+          throw new AppError(`Tour requires at least ${minGuides} guides`, 400);
+        }
+
+        if (maxGuides && guideCount > maxGuides) {
+          throw new AppError(
+            `Tour cannot have more than ${maxGuides} guides`,
+            400,
+          );
+        }
+      }
+
+      if (data.guideDetails?.leadGuide) {
+        if (!data.guides.includes(data.guideDetails.leadGuide)) {
+          throw new AppError("Lead guide must be in the guides array", 400);
+        }
+      }
+    }
+
+    return data;
+  },
+  afterUpdate: async (updatedDoc, existingDoc) => {
+    if (updatedDoc.guides) {
+      const currentGuideIds = (existingDoc.guides || []).map((id) =>
+        id.toString(),
+      );
+      const newGuideIds = updatedDoc.guides.map((id) => id.toString());
+
+      const guidesToAdd = newGuideIds.filter(
+        (id) => !currentGuideIds.includes(id),
+      );
+      const guidesToRemove = currentGuideIds.filter(
+        (id) => !newGuideIds.includes(id),
+      );
+
+      if (guidesToAdd.length > 0) {
+        await User.updateMany(
+          { _id: { $in: guidesToAdd } },
+          { $addToSet: { assignedTours: updatedDoc._id } },
+        );
+      }
+
+      if (guidesToRemove.length > 0) {
+        await User.updateMany(
+          { _id: { $in: guidesToRemove } },
+          { $pull: { assignedTours: updatedDoc._id } },
+        );
+      }
+    }
+  },
 });
 
 const getTourWithReviews = catchAsync(async (req, res) => {
