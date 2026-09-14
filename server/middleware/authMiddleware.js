@@ -6,6 +6,10 @@ import {
   sendForbiddenResponse,
 } from "../utils/responseHelper.js";
 
+/* ============================================================
+   AUTHENTICATION
+   ============================================================ */
+
 export const protect = async (req, res, next) => {
   let token;
 
@@ -72,6 +76,10 @@ export const protect = async (req, res, next) => {
   }
 };
 
+/* ============================================================
+   AUTHORIZATION
+   ============================================================ */
+
 export const authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
@@ -95,6 +103,7 @@ export const hasPermission = (permission) => {
     "manage:all-tours": ["lead-guide", "admin"],
     "manage:guide-schedule": ["lead-guide", "admin"],
     "delete:tours": ["lead-guide", "admin"],
+    "view:stats": ["lead-guide", "admin"],
 
     "view:assigned-tours": ["guide", "lead-guide", "admin"],
     "manage:assigned-tours": ["guide", "lead-guide", "admin"],
@@ -125,8 +134,12 @@ export const hasPermission = (permission) => {
   };
 };
 
+/* ============================================================
+   ROLE HELPERS
+   ============================================================ */
+
 export const isGuide = (req, res, next) => {
-  if (!req.user.isGuide()) {
+  if (!req.user.isGuide || !req.user.isGuide()) {
     return sendForbiddenResponse(res, "Only guides can access this route");
   }
   next();
@@ -142,33 +155,76 @@ export const isLeadGuideOrAdmin = (req, res, next) => {
   next();
 };
 
+/* ============================================================
+   TOUR-SPECIFIC ACCESS CHECKS
+   ============================================================ */
+
+/**
+ * Grants access if:
+ *  - user is admin, OR
+ *  - user is lead-guide AND (created the tour OR is assigned), OR
+ *  - user is guide AND is assigned to the tour
+ */
 export const hasTourAccess = async (req, res, next) => {
-  const { id: tourId } = req.params;
+  try {
+    const { id: tourId } = req.params;
 
-  if (req.user.role === "admin" || req.user.role === "lead-guide") {
-    return next();
-  }
+    if (!tourId) {
+      return sendForbiddenResponse(res, "Tour ID is required");
+    }
 
-  if (req.user.role === "guide") {
-    const user = await User.findById(req.user._id).populate("assignedTours");
+    if (req.user.role === "admin") {
+      return next();
+    }
 
-    const hasAccess = user.assignedTours.some(
-      (tour) => tour._id.toString() === tourId,
-    );
+    if (req.user.role === "lead-guide") {
+      const tour = await Tour.findById(tourId).select("createdBy guides");
 
-    if (!hasAccess) {
+      if (!tour) {
+        return sendForbiddenResponse(res, "Tour not found");
+      }
+
+      const isCreator =
+        tour.createdBy && tour.createdBy.toString() === req.user._id.toString();
+      const isAssigned = tour.guides.some(
+        (g) => g.toString() === req.user._id.toString(),
+      );
+
+      if (isCreator || isAssigned) {
+        return next();
+      }
+
       return sendForbiddenResponse(res, "You don't have access to this tour");
     }
 
-    return next();
-  }
+    if (req.user.role === "guide") {
+      const user = await User.findById(req.user._id).select("assignedTours");
 
-  return sendForbiddenResponse(
-    res,
-    "You don't have permission to access this tour",
-  );
+      const hasAccess = (user.assignedTours || []).some(
+        (t) => t.toString() === tourId,
+      );
+
+      if (!hasAccess) {
+        return sendForbiddenResponse(res, "You don't have access to this tour");
+      }
+
+      return next();
+    }
+
+    return sendForbiddenResponse(
+      res,
+      "You don't have permission to access this tour",
+    );
+  } catch (error) {
+    return sendForbiddenResponse(res, "Error checking tour access");
+  }
 };
 
+/**
+ * Grants delete permission if:
+ *  - user is admin, OR
+ *  - user is lead-guide AND (created the tour OR is assigned to it)
+ */
 export const canDeleteTour = async (req, res, next) => {
   try {
     if (req.user.role === "admin") {
@@ -176,25 +232,21 @@ export const canDeleteTour = async (req, res, next) => {
     }
 
     if (req.user.role === "lead-guide") {
-      const tour = await Tour.findById(req.params.id);
+      const tour = await Tour.findById(req.params.id).select(
+        "createdBy guides",
+      );
 
       if (!tour) {
         return sendForbiddenResponse(res, "Tour not found");
       }
 
-      if (
-        tour.createdBy &&
-        tour.createdBy.toString() === req.user._id.toString()
-      ) {
-        return next();
-      }
+      const isCreator =
+        tour.createdBy && tour.createdBy.toString() === req.user._id.toString();
+      const isAssigned = tour.guides.some(
+        (g) => g.toString() === req.user._id.toString(),
+      );
 
-      if (
-        tour.guides &&
-        tour.guides.some(
-          (guideId) => guideId.toString() === req.user._id.toString(),
-        )
-      ) {
+      if (isCreator || isAssigned) {
         return next();
       }
 
@@ -209,6 +261,10 @@ export const canDeleteTour = async (req, res, next) => {
     return sendForbiddenResponse(res, "Error checking deletion permissions");
   }
 };
+
+/* ============================================================
+   LOGIN ATTEMPT CHECK
+   ============================================================ */
 
 export const checkLoginAttempts = async (req, res, next) => {
   const { email } = req.body;
