@@ -12,8 +12,39 @@ import {
   deleteMany,
   restoreOne,
   permanentDeleteOne,
+  createOne,
+  updateOne,
+  updateMany,
 } from "../utils/handlerFactory.js";
 import { AppError } from "../utils/appError.js";
+
+/* ============================================================
+   SHARED SELECTS / CONSTANTS
+   ============================================================ */
+
+const SENSITIVE_FIELDS = [
+  "password",
+  "passwordConfirm",
+  "passwordChangedAt",
+  "resetPasswordToken",
+  "resetPasswordExpire",
+  "loginAttempts",
+  "lockUntil",
+  "tokenVersion",
+  "accountDeleted",
+  "accountDeletedAt",
+  "_id",
+  "createdAt",
+  "updatedAt",
+  "__v",
+];
+
+const SAFE_USER_SELECT =
+  "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire -loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt";
+
+/* ============================================================
+   DELETE FACTORY HANDLERS
+   ============================================================ */
 
 const deleteUser = deleteOne(User, {
   modelName: "User",
@@ -36,7 +67,6 @@ const deleteUser = deleteOne(User, {
       );
     }
   },
-
   afterDelete: (doc) => {
     console.log(`User ${doc.email} soft deleted`);
   },
@@ -45,7 +75,6 @@ const deleteUser = deleteOne(User, {
 const permanentDeleteUser = permanentDeleteOne(User, {
   modelName: "User",
   idParam: "id",
-
   beforePermanentDelete: (doc, req) => {
     if (req.user.role !== "admin") {
       throw new AppError("Only admins can permanently delete users", 403);
@@ -62,7 +91,6 @@ const permanentDeleteUser = permanentDeleteOne(User, {
 const restoreUser = restoreOne(User, {
   modelName: "User",
   idParam: "id",
-
   beforeRestore: (doc, req) => {
     if (req.user.role !== "admin") {
       throw new AppError("Only admins can restore users", 403);
@@ -97,34 +125,120 @@ const bulkDeleteUsers = deleteMany(User, {
   },
 });
 
+/* ============================================================
+   CREATE FACTORY HANDLER
+   ============================================================ */
+
+const createUser = createOne(User, {
+  modelName: "User",
+  blockedFields: [
+    "accountDeleted",
+    "accountDeletedAt",
+    "tokenVersion",
+    "loginAttempts",
+    "lockUntil",
+    "passwordChangedAt",
+    "resetPasswordToken",
+    "resetPasswordExpire",
+  ],
+
+  transformData: (data) => {
+    if (data.password && !data.passwordConfirm) {
+      data.passwordConfirm = data.password;
+    }
+
+    return data;
+  },
+
+  beforeCreate: async (data) => {
+    const existingUser = await User.findOne({ email: data.email });
+
+    if (existingUser) {
+      throw new AppError("Email already registered", 400);
+    }
+
+    return {
+      ...data,
+      role: data.role || "user",
+    };
+  },
+
+  populateOptions: null,
+});
+
+const updateUser = updateOne(User, {
+  modelName: "User",
+  idParam: "id",
+  conditions: { accountDeleted: false },
+  blockedFields: SENSITIVE_FIELDS,
+  select: SAFE_USER_SELECT,
+
+  beforeUpdate: (data) => {
+    if (data.password) {
+      throw new AppError(
+        "Use the password reset route to update password",
+        400,
+      );
+    }
+
+    return data;
+  },
+});
+
+const updateUserRole = updateOne(User, {
+  modelName: "User",
+  idParam: "id",
+  allowedFields: ["role"],
+  select: SAFE_USER_SELECT,
+
+  beforeUpdate: (data) => {
+    if (!data.role) {
+      throw new AppError("Please provide a role", 400);
+    }
+
+    const validRoles = ["user", "guide", "lead-guide", "admin"];
+
+    if (!validRoles.includes(data.role)) {
+      throw new AppError(
+        `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        400,
+      );
+    }
+
+    return data;
+  },
+});
+
+const bulkUpdateUsers = updateMany(User, {
+  modelName: "User",
+  idsField: "userIds",
+  maxUpdateLimit: 100,
+  conditions: { accountDeleted: false },
+  blockedFields: [...SENSITIVE_FIELDS, "role", "email"],
+
+  checkAuthorization: (_docs, req) => {
+    if (req.user.role !== "admin") {
+      throw new AppError("Only admins can bulk update users", 403);
+    }
+  },
+});
+
 const getAllUsers = catchAsync(async (req, res) => {
-  const users = await User.find({ accountDeleted: false })
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    );
+  const users = await User.find({ accountDeleted: false }).select(
+    SAFE_USER_SELECT,
+  );
 
   sendSuccessResponse(res, 200, "Users fetched successfully", users, {
     results: users.length,
   });
 });
 
-/**
- * Get a single user
- */
 const getUser = catchAsync(async (req, res) => {
   const user = await User.findOne({
     _id: req.params.id,
     accountDeleted: false,
   })
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    )
+    .select(SAFE_USER_SELECT)
     .populate({
       path: "assignedTours",
       select: "name slug price duration difficulty ratingsAverage imageCover",
@@ -146,129 +260,6 @@ const getUser = catchAsync(async (req, res) => {
   sendSuccessResponse(res, 200, "User fetched successfully", user);
 });
 
-/**
- * Create a user
- */
-const createUser = catchAsync(async (req, res) => {
-  const { name, email, password, photo, role } = req.body;
-
-  const existingUser = await User.findOne({ email });
-
-  if (existingUser) {
-    return sendValidationErrorResponse(res, "Email already registered");
-  }
-
-  const user = await User.create({
-    name,
-    email,
-    password,
-    photo,
-    role: role || "user",
-  });
-
-  const userWithoutPassword = user.toObject();
-
-  delete userWithoutPassword.password;
-
-  sendSuccessResponse(res, 201, "User created successfully", {
-    user: userWithoutPassword,
-  });
-});
-
-/**
- * Update a user
- */
-const updateUser = catchAsync(async (req, res) => {
-  const {
-    password,
-    passwordConfirm: _passwordConfirm,
-    ...updateData
-  } = req.body;
-
-  if (password) {
-    return sendValidationErrorResponse(
-      res,
-      "Use the password reset route to update password",
-    );
-  }
-
-  delete updateData.role;
-  delete updateData.accountDeleted;
-  delete updateData.tokenVersion;
-  delete updateData.passwordChangedAt;
-  delete updateData.loginAttempts;
-  delete updateData.lockUntil;
-  delete updateData._id;
-  delete updateData.createdAt;
-  delete updateData.updatedAt;
-
-  const user = await User.findOneAndUpdate(
-    { _id: req.params.id, accountDeleted: false },
-    updateData,
-    {
-      new: true,
-      runValidators: true,
-    },
-  )
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    );
-
-  if (!user) {
-    return sendNotFoundResponse(res, "User not found");
-  }
-
-  sendSuccessResponse(res, 200, "User updated successfully", user);
-});
-
-/**
- * Update user role (admin only)
- */
-const updateUserRole = catchAsync(async (req, res) => {
-  const { role } = req.body;
-  const { id } = req.params;
-
-  if (!role) {
-    return sendValidationErrorResponse(res, "Please provide a role");
-  }
-
-  const validRoles = ["user", "guide", "lead-guide", "admin"];
-
-  if (!validRoles.includes(role)) {
-    return sendValidationErrorResponse(
-      res,
-      `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-    );
-  }
-
-  const user = await User.findByIdAndUpdate(
-    id,
-    { role },
-    {
-      new: true,
-      runValidators: true,
-    },
-  )
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    );
-
-  if (!user) {
-    return sendNotFoundResponse(res, "User not found");
-  }
-
-  sendSuccessResponse(res, 200, "User role updated successfully", user);
-});
-
-/**
- * Get users by role
- */
 const getUsersByRole = catchAsync(async (req, res) => {
   const { role } = req.params;
   const validRoles = ["user", "guide", "lead-guide", "admin"];
@@ -283,13 +274,7 @@ const getUsersByRole = catchAsync(async (req, res) => {
   const users = await User.find({
     role,
     accountDeleted: false,
-  })
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    );
+  }).select(SAFE_USER_SELECT);
 
   sendSuccessResponse(
     res,
@@ -302,9 +287,6 @@ const getUsersByRole = catchAsync(async (req, res) => {
   );
 });
 
-/**
- * Get user tours (nested route)
- */
 const getUserTours = catchAsync(async (req, res) => {
   const { userId } = req.params;
   const {
@@ -398,9 +380,6 @@ const getUserTours = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get user reviews (nested route)
- */
 const getUserReviews = catchAsync(async (req, res) => {
   const { userId } = req.params;
   const {
@@ -569,9 +548,6 @@ const getUserReviews = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get user statistics
- */
 const getUserStats = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -722,9 +698,6 @@ const getUserStats = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get users with statistics (admin only)
- */
 const getUsersWithStats = catchAsync(async (req, res) => {
   const users = await User.aggregate([
     {
@@ -802,9 +775,6 @@ const getUsersWithStats = catchAsync(async (req, res) => {
   );
 });
 
-/**
- * Search users
- */
 const searchUsers = catchAsync(async (req, res) => {
   const { q, role, limit = 20, page = 1 } = req.query;
 
@@ -833,16 +803,12 @@ const searchUsers = catchAsync(async (req, res) => {
         `Invalid role. Must be one of: ${validRoles.join(", ")}`,
       );
     }
+
     searchQuery.role = role;
   }
 
   const users = await User.find(searchQuery)
-    .select(
-      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
-    )
-    .select(
-      "-loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt",
-    )
+    .select(SAFE_USER_SELECT)
     .skip(skip)
     .limit(limitNum)
     .sort({ name: 1 });
@@ -854,43 +820,6 @@ const searchUsers = catchAsync(async (req, res) => {
     page: pageNum,
     pages: Math.ceil(total / limitNum),
     limit: limitNum,
-  });
-});
-
-/**
- * Bulk update users (admin only)
- */
-const bulkUpdateUsers = catchAsync(async (req, res) => {
-  const { userIds, updateData } = req.body;
-
-  if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-    return sendValidationErrorResponse(
-      res,
-      "Please provide an array of user IDs",
-    );
-  }
-
-  if (!updateData || Object.keys(updateData).length === 0) {
-    return sendValidationErrorResponse(res, "Please provide update data");
-  }
-
-  delete updateData.password;
-  delete updateData.role;
-  delete updateData.accountDeleted;
-  delete updateData.tokenVersion;
-  delete updateData.passwordChangedAt;
-  delete updateData.loginAttempts;
-  delete updateData.lockUntil;
-
-  const result = await User.updateMany(
-    { _id: { $in: userIds }, accountDeleted: false },
-    updateData,
-    { runValidators: true },
-  );
-
-  sendSuccessResponse(res, 200, "Users updated successfully", {
-    matchedCount: result.matchedCount,
-    modifiedCount: result.modifiedCount,
   });
 });
 
