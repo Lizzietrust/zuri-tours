@@ -46,18 +46,45 @@ import reviewRouter from "./reviewRoutes.js";
 
 const router = express.Router();
 
+/* ============================================================
+   NESTED ROUTES (must be first so /:tourId/reviews wins)
+   ============================================================ */
+
 router.use("/:tourId/reviews", reviewRouter);
+
+/* ============================================================
+   PUBLIC ROUTES (read-only discovery)
+   ============================================================ */
 
 router.route("/top-5-cheap").get(getTopCheapTours);
 router.route("/top-rated").get(getToursByRating);
 router.route("/shortest").get(getToursByDuration);
-router.route("/stats").get(getTourStats);
-router.route("/monthly-plan/:year").get(getMonthlyPlan);
 router.route("/price-range").get(getToursByPriceRange);
 router.route("/difficulty/:level").get(getToursByDifficulty);
 router.route("/search").get(searchTours);
 
-router.route("/:id/reviews").get(getTourWithReviews);
+/* ============================================================
+   AUTHENTICATED NON-ADMIN ROUTES
+   (MUST be declared before /:id to avoid being shadowed)
+   ============================================================ */
+
+router
+  .route("/my-assigned-tours")
+  .get(protect, authorize("guide", "lead-guide"), getAssignedTours);
+
+/* ============================================================
+   ADMIN / LEAD-GUIDE STATS & PLANS
+   ============================================================ */
+
+router.route("/stats").get(protect, hasPermission("view:stats"), getTourStats);
+
+router
+  .route("/monthly-plan/:year")
+  .get(protect, hasPermission("view:stats"), getMonthlyPlan);
+
+/* ============================================================
+   MAIN COLLECTION
+   ============================================================ */
 
 router
   .route("/")
@@ -70,17 +97,21 @@ router
     createTour,
   );
 
+/* ============================================================
+   BULK ACTIONS (declared before /:id)
+   ============================================================ */
+
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteTours);
+
+/* ============================================================
+   SINGLE TOUR
+   ============================================================ */
+
 router
   .route("/:id")
   .get(getTour)
-  .put(
-    protect,
-    authorize("admin", "lead-guide"),
-    checkValidId,
-    userUpdateLimiter,
-    checkTourBody,
-    updateTour,
-  )
   .patch(
     protect,
     authorize("admin", "lead-guide"),
@@ -90,6 +121,10 @@ router
     updateTour,
   )
   .delete(protect, canDeleteTour, checkValidId, deleteTour);
+
+/* ============================================================
+   SOFT DELETE / RESTORE / PERMANENT
+   ============================================================ */
 
 router
   .route("/:id/soft-delete")
@@ -108,9 +143,15 @@ router
   .route("/:id/permanent")
   .delete(protect, authorize("admin"), checkValidId, permanentDeleteTour);
 
-router
-  .route("/bulk/delete")
-  .delete(protect, authorize("admin"), bulkDeleteTours);
+/* ============================================================
+   REVIEWS FOR A SINGLE TOUR
+   ============================================================ */
+
+router.route("/:id/reviews").get(getTourWithReviews);
+
+/* ============================================================
+   GUIDE MANAGEMENT
+   ============================================================ */
 
 router
   .route("/:id/assign-guide")
@@ -159,9 +200,5 @@ router
 router
   .route("/:id/guide-rating")
   .post(protect, hasTourAccess, userUpdateLimiter, addGuideRating);
-
-router
-  .route("/my-assigned-tours")
-  .get(protect, authorize("guide", "lead-guide"), getAssignedTours);
 
 export default router;
