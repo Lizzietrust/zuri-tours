@@ -15,6 +15,8 @@ import {
   createOne,
   updateOne,
   updateMany,
+  getAll,
+  getOne,
 } from "../utils/handlerFactory.js";
 import { AppError } from "../utils/appError.js";
 
@@ -223,68 +225,58 @@ const bulkUpdateUsers = updateMany(User, {
   },
 });
 
-const getAllUsers = catchAsync(async (req, res) => {
-  const users = await User.find({ accountDeleted: false }).select(
-    SAFE_USER_SELECT,
-  );
-
-  sendSuccessResponse(res, 200, "Users fetched successfully", users, {
-    results: users.length,
-  });
+const getAllUsers = getAll(User, {
+  modelName: "User",
+  conditions: { accountDeleted: false },
+  searchFields: ["name", "email"],
+  allowedFilters: ["role"],
+  allowedSorts: ["createdAt", "name", "email"],
+  defaultSort: { createdAt: -1 },
+  defaultLimit: 20,
+  maxLimit: 100,
+  defaultSelect: SAFE_USER_SELECT,
+  resourceKey: "users",
 });
 
-const getUser = catchAsync(async (req, res) => {
-  const user = await User.findOne({
-    _id: req.params.id,
-    accountDeleted: false,
-  })
-    .select(SAFE_USER_SELECT)
-    .populate({
+const getUser = getOne(User, {
+  modelName: "User",
+  conditions: { accountDeleted: false },
+  select: SAFE_USER_SELECT,
+  populateOptions: [
+    {
       path: "assignedTours",
       select: "name slug price duration difficulty ratingsAverage imageCover",
-      populate: {
-        path: "guides",
-        select: "name email profileImage",
-      },
-    })
-    .populate({
+      populate: { path: "guides", select: "name email profileImage" },
+    },
+    {
       path: "bookings.tour",
       select: "name slug price duration difficulty imageCover",
-    })
-    .lean();
-
-  if (!user) {
-    return sendNotFoundResponse(res, "User not found");
-  }
-
-  sendSuccessResponse(res, 200, "User fetched successfully", user);
+    },
+  ],
 });
 
-const getUsersByRole = catchAsync(async (req, res) => {
-  const { role } = req.params;
-  const validRoles = ["user", "guide", "lead-guide", "admin"];
+const getUsersByRole = getAll(User, {
+  modelName: "User",
+  conditions: { accountDeleted: false },
+  defaultSelect: SAFE_USER_SELECT,
+  defaultSort: { createdAt: -1 },
+  defaultLimit: 20,
+  maxLimit: 100,
+  resourceKey: "users",
 
-  if (!validRoles.includes(role)) {
-    return sendValidationErrorResponse(
-      res,
-      `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-    );
-  }
+  transformFilter: (filter, req) => {
+    const validRoles = ["user", "guide", "lead-guide", "admin"];
+    const role = req.params.role || filter.role;
 
-  const users = await User.find({
-    role,
-    accountDeleted: false,
-  }).select(SAFE_USER_SELECT);
+    if (!validRoles.includes(role)) {
+      throw new AppError(
+        `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        400,
+      );
+    }
 
-  sendSuccessResponse(
-    res,
-    200,
-    `Users with role '${role}' fetched successfully`,
-    users,
-    {
-      results: users.length,
-    },
-  );
+    return { ...filter, role };
+  },
 });
 
 const getUserTours = catchAsync(async (req, res) => {
