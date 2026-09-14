@@ -91,13 +91,14 @@ export const sendCreated = (
 
 /**
  * Send a no content response (204)
+ *
+ * Per HTTP spec, a 204 response must NOT include a body.
+ * Use `.end()` to properly terminate the response.
+ *
  * @param {Object} res - Express response object
  */
 export const sendNoContent = (res) => {
-  return res.status(204).json({
-    status: "success",
-    data: null,
-  });
+  return res.status(204).end();
 };
 
 /**
@@ -137,18 +138,23 @@ export const sendErrorResponse = (
     if (error.code) {
       errorDetails.code = error.code;
     }
+
     if (error.path) {
       errorDetails.path = error.path;
     }
+
     if (error.value) {
       errorDetails.value = error.value;
     }
+
     if (error.keyPattern) {
       errorDetails.keyPattern = error.keyPattern;
     }
+
     if (error.keyValue) {
       errorDetails.keyValue = error.keyValue;
     }
+
     if (error.errors) {
       errorDetails.validationErrors = error.errors;
     }
@@ -158,6 +164,7 @@ export const sendErrorResponse = (
     if (error.isOperational !== undefined) {
       response.isOperational = error.isOperational;
     }
+
     if (error.status) {
       response.errorStatus = error.status;
     }
