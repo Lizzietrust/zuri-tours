@@ -7,7 +7,13 @@ import {
   deleteMany,
   restoreOne,
   permanentDeleteOne,
+  createOne,
+  updateOne,
 } from "../utils/handlerFactory.js";
+
+/* ============================================================
+   POPULATION HELPERS
+   ============================================================ */
 
 const POPULATION_CONFIG = {
   user: {
@@ -144,6 +150,10 @@ const buildPopulationOptions = (parsedOptions, userRole = null) => {
   return options;
 };
 
+/* ============================================================
+   DELETE FACTORY HANDLERS
+   ============================================================ */
+
 const deleteReview = deleteOne(Review, {
   modelName: "Review",
   softDelete: true,
@@ -215,86 +225,130 @@ const bulkDeleteReviews = deleteMany(Review, {
   },
 });
 
-const createReview = catchAsync(async (req, res) => {
-  const tourId = req.params.tourId || req.params.id || req.body.tourId;
-  const { review, rating, title, isRecommended } = req.body;
+/* ============================================================
+   CREATE FACTORY HANDLER
+   ============================================================ */
 
-  if (!review || !rating) {
-    throw new AppError("Please provide review text and rating", 400);
-  }
-
-  const tour = await Tour.findById(tourId);
-
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
-
-  const existingReview = await Review.findOne({
-    tour: tourId,
-    user: req.user._id,
-  });
-
-  if (existingReview) {
-    throw new AppError("You have already reviewed this tour", 400);
-  }
-
-  let isVerifiedPurchase = false;
-
-  if (req.user.bookings && req.user.bookings.length > 0) {
-    const hasBooking = req.user.bookings.some(
-      (booking) => booking.tour.toString() === tourId.toString(),
-    );
-
-    if (hasBooking) {
-      isVerifiedPurchase = true;
-    }
-  }
-
-  const reviewData = {
-    review,
-    rating,
-    title: title || "",
-    tour: tourId,
-    user: req.user._id,
-    isVerifiedPurchase,
-    isRecommended: isRecommended !== undefined ? isRecommended : true,
-    metadata: {
-      userAgent: req.headers["user-agent"],
-      ipAddress: req.ip || req.connection.remoteAddress,
-      device: req.device?.type || "other",
-    },
-  };
-
-  const isTourCreator = tour.createdBy.toString() === req.user._id.toString();
-
-  if (
-    req.user.role === "admin" ||
-    req.user.role === "lead-guide" ||
-    isTourCreator
-  ) {
-    reviewData.status = "approved";
-  }
-
-  const newReview = await Review.create(reviewData);
-
-  const populatedReview = await populateReviewFields(
-    Review.findById(newReview._id),
+const createReview = createOne(Review, {
+  modelName: "Review",
+  populateOptions: [
+    { path: "user", select: "name email profileImage role bio" },
     {
-      populateUser: true,
-      populateTour: true,
+      path: "tour",
+      select:
+        "name slug price duration difficulty imageCover ratingsAverage ratingsQuantity",
     },
-  ).lean();
+  ],
+  beforeCreate: async (data, req) => {
+    const tourId = req.params.tourId || req.params.id || req.body.tourId;
 
-  res.status(201).json({
-    status: "success",
-    message: "Review created successfully",
-    data: { review: populatedReview },
-  });
+    if (!data.review || !data.rating) {
+      throw new AppError("Please provide review text and rating", 400);
+    }
+
+    const tour = await Tour.findById(tourId);
+
+    if (!tour) {
+      throw new AppError("Tour not found", 404);
+    }
+
+    const existingReview = await Review.findOne({
+      tour: tourId,
+      user: req.user._id,
+    });
+
+    if (existingReview) {
+      throw new AppError("You have already reviewed this tour", 400);
+    }
+
+    let isVerifiedPurchase = false;
+
+    if (req.user.bookings && req.user.bookings.length > 0) {
+      isVerifiedPurchase = req.user.bookings.some(
+        (booking) => booking.tour.toString() === tourId.toString(),
+      );
+    }
+
+    const isTourCreator = tour.createdBy.toString() === req.user._id.toString();
+    const autoApprove =
+      req.user.role === "admin" ||
+      req.user.role === "lead-guide" ||
+      isTourCreator;
+
+    return {
+      ...data,
+      tour: tourId,
+      user: req.user._id,
+      title: data.title || "",
+      isVerifiedPurchase,
+      isRecommended:
+        data.isRecommended !== undefined ? data.isRecommended : true,
+      ...(autoApprove && { status: "approved" }),
+      metadata: {
+        userAgent: req.headers["user-agent"],
+        ipAddress: req.ip || req.connection.remoteAddress,
+        device: req.device?.type || "other",
+      },
+    };
+  },
 });
 
-/**
- * Get all reviews
- */
+/* ============================================================
+   UPDATE FACTORY HANDLER
+   ============================================================ */
+
+const updateReview = updateOne(Review, {
+  modelName: "Review",
+  populateOptions: [
+    { path: "user", select: "name email profileImage role bio" },
+    {
+      path: "tour",
+      select:
+        "name slug price duration difficulty imageCover ratingsAverage ratingsQuantity",
+    },
+    { path: "editHistory.editedBy", select: "name email role" },
+    { path: "response.respondedBy", select: "name email role profileImage" },
+  ],
+
+  checkOwnership: (doc, req) => {
+    if (doc.user.toString() !== req.user._id.toString()) {
+      throw new AppError("You are not authorized to update this review", 403);
+    }
+
+    if (doc.status === "rejected" || doc.status === "flagged") {
+      throw new AppError("This review cannot be edited", 400);
+    }
+  },
+
+  beforeUpdate: (data, existingDoc, req) => {
+    const updateData = {};
+
+    if (data.review !== undefined) updateData.review = data.review;
+    if (data.rating !== undefined) updateData.rating = data.rating;
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.isRecommended !== undefined) {
+      updateData.isRecommended = data.isRecommended;
+    }
+
+    const editHistory = existingDoc.editHistory || [];
+
+    editHistory.push({
+      review: existingDoc.review,
+      rating: existingDoc.rating,
+      editedAt: new Date(),
+      editedBy: req.user._id,
+    });
+
+    updateData.editHistory = editHistory;
+
+    if (existingDoc.status === "approved") {
+      updateData.status = "pending";
+    }
+
+    return updateData;
+  },
+});
+
 const getAllReviews = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.query.tourId;
   const {
@@ -400,9 +454,6 @@ const getAllReviews = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get a single review
- */
 const getReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const {
@@ -464,81 +515,10 @@ const getReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Update a review
- */
-const updateReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const { review, rating, title, isRecommended } = req.body;
+/* ============================================================
+   OTHER HANDLERS (unchanged)
+   ============================================================ */
 
-  const existingReview = await Review.findById(id);
-
-  if (!existingReview) {
-    throw new AppError("Review not found", 404);
-  }
-
-  if (existingReview.user.toString() !== req.user._id.toString()) {
-    throw new AppError("You are not authorized to update this review", 403);
-  }
-
-  if (
-    existingReview.status === "rejected" ||
-    existingReview.status === "flagged"
-  ) {
-    throw new AppError("This review cannot be edited", 400);
-  }
-
-  const updateData = {};
-
-  if (review) updateData.review = review;
-  if (rating) updateData.rating = rating;
-  if (title !== undefined) updateData.title = title;
-  if (isRecommended !== undefined) updateData.isRecommended = isRecommended;
-
-  if (!existingReview.editHistory) {
-    existingReview.editHistory = [];
-  }
-
-  existingReview.editHistory.push({
-    review: existingReview.review,
-    rating: existingReview.rating,
-    editedAt: new Date(),
-    editedBy: req.user._id,
-  });
-
-  if (existingReview.status === "approved") {
-    updateData.status = "pending";
-  }
-
-  const updatedReview = await Review.findByIdAndUpdate(
-    id,
-    { ...updateData, editHistory: existingReview.editHistory },
-    {
-      new: true,
-      runValidators: true,
-    },
-  );
-
-  const populatedReview = await populateReviewFields(
-    Review.findById(updatedReview._id),
-    {
-      populateUser: true,
-      populateTour: true,
-      populateEditHistory: true,
-      populateResponseUser: true,
-    },
-  ).lean();
-
-  res.status(200).json({
-    status: "success",
-    message: "Review updated successfully",
-    data: { review: populatedReview },
-  });
-});
-
-/**
- * Mark review as helpful
- */
 const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -569,9 +549,6 @@ const markHelpful = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Add response to review
- */
 const addReviewResponse = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
@@ -615,9 +592,6 @@ const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Approve review (admin only)
- */
 const approveReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -647,9 +621,6 @@ const approveReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Reject review (admin only)
- */
 const rejectReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -671,9 +642,6 @@ const rejectReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Flag review
- */
 const flagReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { reason, description } = req.body;
@@ -711,9 +679,6 @@ const flagReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get review statistics
- */
 const getReviewStats = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
 
@@ -769,9 +734,6 @@ const getReviewStats = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tour reviews (public)
- */
 const getTourReviews = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
   const {
@@ -862,9 +824,6 @@ const getTourReviews = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get my reviews
- */
 const getMyReviews = catchAsync(async (req, res) => {
   const {
     page = 1,
@@ -919,9 +878,6 @@ const getMyReviews = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get batch tour reviews
- */
 const getBatchTourReviews = catchAsync(async (req, res) => {
   const { tourIds } = req.body;
   const {
@@ -977,6 +933,10 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
     data: { reviewsByTour },
   });
 });
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 
 export {
   deleteReview,
