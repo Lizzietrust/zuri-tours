@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import Tour from "../models/Tour.js";
+import User from "../models/User.js";
+import Review from "../models/Review.js";
 
 dotenv.config();
 
@@ -17,53 +19,165 @@ if (!DB) {
   process.exit(1);
 }
 
-mongoose
-  .connect(DB)
-  .then(() => {
+const connectDB = async () => {
+  try {
+    await mongoose.connect(DB);
     console.log(
       `✅ Database connected successfully to: ${mongoose.connection.name}`,
     );
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error("❌ Database connection error:", err.message);
     process.exit(1);
-  });
+  }
+};
 
+const usersFilePath = path.join(__dirname, "../dev-data/users.json");
 const toursFilePath = path.join(__dirname, "../dev-data/tours.json");
+const reviewsFilePath = path.join(__dirname, "../dev-data/reviews.json");
 
-if (!fs.existsSync(toursFilePath)) {
-  console.error(`❌ Data file not found: ${toursFilePath}`);
-  console.log("Please create the file at: server/dev-data/tours.json");
-  process.exit(1);
+const requiredFiles = [
+  { path: usersFilePath, label: "users.json" },
+  { path: toursFilePath, label: "tours.json" },
+  { path: reviewsFilePath, label: "reviews.json" },
+];
+
+for (const file of requiredFiles) {
+  if (!fs.existsSync(file.path)) {
+    console.error(`❌ Data file not found: ${file.path}`);
+    process.exit(1);
+  }
 }
 
-const toursData = JSON.parse(fs.readFileSync(toursFilePath, "utf-8"));
+const readJSON = (filePath) => JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
 const importData = async () => {
+  await connectDB();
+
   try {
-    const count = await Tour.countDocuments();
+    await Review.deleteMany();
+    await Tour.deleteMany();
+    await User.deleteMany();
+    console.log("🗑️  Cleared existing reviews, tours, and users");
 
-    if (count > 0) {
-      console.log(`⚠️  Database already has ${count} tours.`);
-      console.log("🔄 Overwriting existing data...");
-      await Tour.deleteMany();
-      console.log("🗑️  Cleared existing tours");
+    const usersData = readJSON(usersFilePath);
+    const createdUsers = [];
+
+    for (const rawUser of usersData) {
+      const user = new User(rawUser);
+
+      // eslint-disable-next-line no-await-in-loop
+      await user.save();
+      createdUsers.push(user);
     }
+    console.log(`✅ Imported ${createdUsers.length} users`);
 
-    await Tour.create(toursData, { validateBeforeSave: true });
-    console.log(`✅ Successfully imported ${toursData.length} tours!`);
+    const userByEmail = new Map();
+
+    createdUsers.forEach((u) =>
+      userByEmail.set(String(u.email).toLowerCase(), u._id),
+    );
+
+    const toursData = readJSON(toursFilePath);
+
+    const normalizedTours = toursData.map((tour, i) => {
+      const creatorEmail = String(tour.createdByEmail || "").toLowerCase();
+      const createdBy = userByEmail.get(creatorEmail);
+
+      if (!createdBy) {
+        throw new Error(
+          `Tour #${i} ("${tour.name}") references unknown createdByEmail: ${tour.createdByEmail}`,
+        );
+      }
+      if (!tour.location || !Array.isArray(tour.location.coordinates)) {
+        throw new Error(
+          `Tour #${i} ("${tour.name}") is missing location.coordinates`,
+        );
+      }
+
+      const { createdByEmail: _createdByEmail, _id, id: _id2, ...rest } = tour;
+
+      return {
+        ...rest,
+        createdBy,
+        startDates: (tour.startDates || []).map((d) => new Date(d)),
+        location: {
+          ...tour.location,
+          type: tour.location.type || "Point",
+        },
+      };
+    });
+
+    const createdTours = await Tour.create(normalizedTours);
+
+    console.log(`✅ Imported ${createdTours.length} tours`);
+
+    const tourBySlug = new Map();
+
+    createdTours.forEach((t) => tourBySlug.set(t.slug, t._id));
+
+    const reviewsData = readJSON(reviewsFilePath);
+
+    const remappedReviews = reviewsData.map((review, i) => {
+      const user = userByEmail.get(
+        String(review.userEmail || "").toLowerCase(),
+      );
+      const tour = tourBySlug.get(review.tourSlug);
+
+      if (!user) {
+        throw new Error(
+          `Review #${i} references unknown userEmail: ${review.userEmail}`,
+        );
+      }
+      if (!tour) {
+        throw new Error(
+          `Review #${i} references unknown tourSlug: ${review.tourSlug}`,
+        );
+      }
+
+      return {
+        review: review.review,
+        rating: review.rating,
+        user,
+        tour,
+        status: "approved",
+      };
+    });
+
+    const createdReviews = await Review.create(remappedReviews);
+
+    console.log(`✅ Imported ${createdReviews.length} reviews`);
+
+    const [u, t, r] = await Promise.all([
+      User.countDocuments(),
+      Tour.countDocuments(),
+      Review.countDocuments(),
+    ]);
+
+    console.log(`\n📊 Counts → users: ${u}, tours: ${t}, reviews: ${r}`);
+    console.log("🎉 All data imported successfully!");
 
     process.exit(0);
   } catch (error) {
     console.error("❌ Error importing data:", error.message);
+    if (error.errors) {
+      Object.values(error.errors).forEach((e) =>
+        console.error(`   → ${e.path}: ${e.message}`),
+      );
+    }
+    if (error.name === "ValidationError") {
+      console.error("   Validation details:", error.message);
+    }
     process.exit(1);
   }
 };
 
 const deleteData = async () => {
+  await connectDB();
   try {
+    await Review.deleteMany();
     await Tour.deleteMany();
-    console.log("🗑️  All tours deleted successfully!");
+    await User.deleteMany();
+    console.log("🗑️  All reviews, tours, and users deleted successfully!");
     process.exit(0);
   } catch (error) {
     console.error("❌ Error deleting data:", error.message);
@@ -74,12 +188,12 @@ const deleteData = async () => {
 const args = process.argv.slice(2);
 
 if (args.includes("--delete") || args.includes("-d")) {
-  console.log("🗑️  Deleting all tours...");
+  console.log("🗑️  Deleting all data...");
   deleteData();
 } else if (args.includes("--help") || args.includes("-h")) {
   console.log(`
 Usage:
-  npm run import-data           # Import data into database
+  npm run import-data              # Import users, tours, and reviews
   npm run import-data -- --delete  # Delete all data
   npm run import-data -- --help    # Show this help
   `);
