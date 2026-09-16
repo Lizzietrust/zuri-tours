@@ -307,10 +307,9 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-userSchema.pre("validate", function sanitizeBeforeValidate(next) {
-  sanitizeDocument(this);
-  next();
-});
+/* ------------------------------------------------------------------ */
+/*  passwordConfirm virtual                                           */
+/* ------------------------------------------------------------------ */
 
 function getPasswordConfirm() {
   return this._passwordConfirm;
@@ -325,41 +324,32 @@ userSchema
   .get(getPasswordConfirm)
   .set(setPasswordConfirm);
 
-function validatePasswordConfirmMiddleware(next) {
+userSchema.pre("validate", function sanitizeBeforeValidate() {
+  sanitizeDocument(this);
+});
+
+userSchema.pre("validate", function validatePasswordConfirm() {
   if (this._passwordConfirm !== undefined) {
     if (this.password !== this._passwordConfirm) {
       this.invalidate("passwordConfirm", "Passwords do not match");
     }
   }
-  next();
-}
+});
 
-userSchema.pre("validate", validatePasswordConfirmMiddleware);
-
-async function hashPasswordMiddleware(next) {
-  if (!this.isModified("password")) {
-    return next();
-  }
+userSchema.pre("save", async function hashPasswordMiddleware() {
+  if (!this.isModified("password")) return;
 
   const salt = await bcrypt.genSalt(10);
 
   this.password = await bcrypt.hash(this.password, salt);
   this.passwordChangedAt = new Date();
   this.tokenVersion = (this.tokenVersion || 0) + 1;
-
   this.active = true;
+});
 
-  next();
-}
-
-userSchema.pre("save", hashPasswordMiddleware);
-
-function filterActiveUsersMiddleware(next) {
+userSchema.pre(/^find/, function filterActiveUsersMiddleware() {
   this.find({ active: { $ne: false } });
-  next();
-}
-
-userSchema.pre(/^find/, filterActiveUsersMiddleware);
+});
 
 function changedPasswordAfter(JWTTimestamp) {
   if (this.passwordChangedAt) {
@@ -454,7 +444,10 @@ function hasTourAccess(tourId) {
     return true;
   }
 
-  return this.assignedTours && this.assignedTours.includes(tourId);
+  return (
+    this.assignedTours &&
+    this.assignedTours.some((id) => id.toString() === tourId.toString())
+  );
 }
 
 userSchema.methods.isGuide = isGuide;
@@ -464,6 +457,10 @@ userSchema.methods.canManageTours = canManageTours;
 userSchema.methods.canManageGuides = canManageGuides;
 userSchema.methods.canAssignTours = canAssignTours;
 userSchema.methods.hasTourAccess = hasTourAccess;
+
+/* ------------------------------------------------------------------ */
+/*  Statics                                                           */
+/* ------------------------------------------------------------------ */
 
 async function findAndVerifyUser(id) {
   const user = await this.findById(id)
@@ -485,12 +482,16 @@ async function findAndVerifyUser(id) {
 
 userSchema.statics.findAndVerifyUser = findAndVerifyUser;
 
+/* ------------------------------------------------------------------ */
+/*  Indexes                                                           */
+/* ------------------------------------------------------------------ */
+
 userSchema.index({ active: 1 });
 userSchema.index({ tokenVersion: 1 });
 userSchema.index({ lockUntil: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ assignedTours: 1 });
 
-const User = mongoose.model("User", userSchema);
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 
 export default User;
