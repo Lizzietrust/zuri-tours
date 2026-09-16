@@ -12,7 +12,17 @@
     "imageCover": "forest-hiker-cover.jpg",
     "images": ["forest-1.jpg", "forest-2.jpg", "forest-3.jpg"],
     "startDates": ["2026-08-15", "2026-09-01", "2026-09-20"],
-    "guides": []
+    "guides": [],
+    "category": "nature",
+    "createdByEmail": "admin@example.com",
+    "location": {
+      "type": "Point",
+      "coordinates": [-115.5708, 51.1784],
+      "address": "Banff National Park, Alberta, Canada",
+      "city": "Banff",
+      "country": "Canada",
+      "region": "Alberta"
+    }
   },
   {
     "name": "The Sea Explorer",
@@ -27,7 +37,17 @@
     "imageCover": "sea-explorer-cover.jpg",
     "images": ["sea-1.jpg", "sea-2.jpg", "sea-3.jpg"],
     "startDates": ["2026-07-10", "2026-08-05", "2026-09-15"],
-    "guides": []
+    "guides": [],
+    "category": "beach",
+    "createdByEmail": "admin@example.com",
+    "location": {
+      "type": "Point",
+      "coordinates": [-123.1207, 49.2827],
+      "address": "Vancouver, British Columbia, Canada",
+      "city": "Vancouver",
+      "country": "Canada",
+      "region": "British Columbia"
+    }
   },
   {
     "name": "The Snow Adventurer",
@@ -42,6 +62,16 @@
     "imageCover": "snow-adventurer-cover.jpg",
     "images": ["snow-1.jpg", "snow-2.jpg", "snow-3.jpg"],
     "startDates": ["2026-12-10", "2027-01-15", "2027-02-20"],
-    "guides": []
+    "guides": [],
+    "category": "mountain",
+    "createdByEmail": "admin@example.com",
+    "location": {
+      "type": "Point",
+      "coordinates": [7.6586, 45.9763],
+      "address": "Zermatt, Valais, Switzerland",
+      "city": "Zermatt",
+      "country": "Switzerland",
+      "region": "Valais"
+    }
   }
 ]
