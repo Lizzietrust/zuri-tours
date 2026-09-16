@@ -1,0 +1,26 @@
+[
+  {
+    "review": "Absolutely breathtaking hike. Worth every penny!",
+    "rating": 5,
+    "tourSlug": "the-forest-hiker",
+    "userEmail": "alice@example.com"
+  },
+  {
+    "review": "Great guides, stunning scenery, but the pace was a bit fast.",
+    "rating": 4,
+    "tourSlug": "the-forest-hiker",
+    "userEmail": "bob@example.com"
+  },
+  {
+    "review": "Kayaking through the fjords was unreal. Highly recommend!",
+    "rating": 5,
+    "tourSlug": "the-sea-explorer",
+    "userEmail": "alice@example.com"
+  },
+  {
+    "review": "Too difficult for beginners — but I loved the challenge.",
+    "rating": 4,
+    "tourSlug": "the-snow-adventurer",
+    "userEmail": "carol@example.com"
+  }
+]
