@@ -1033,11 +1033,10 @@ tourSchema.query = {
 };
 
 /* ================================================================== */
-/*  MIDDLEWARE — sync `pre("save")`, no `next`, no `async`           */
+/*  MIDDLEWARE                                                        */
 /* ================================================================== */
 
 tourSchema.pre("save", function preSaveMiddleware() {
-  /* ---------- Secret tour defaults ---------- */
   if (this.isSecret && !this.secretCode) {
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -1079,7 +1078,6 @@ tourSchema.pre("save", function preSaveMiddleware() {
     }
   }
 
-  /* ---------- Structural checks ---------- */
   if (
     this.guideDetails &&
     this.guideDetails.leadGuide &&
@@ -1133,7 +1131,6 @@ tourSchema.pre("save", function preSaveMiddleware() {
     }
   }
 
-  /* ---------- Geo validation ---------- */
   if (this.location && Array.isArray(this.location.coordinates)) {
     const [lng, lat] = this.location.coordinates;
 
@@ -1249,78 +1246,84 @@ tourSchema.post("aggregate", function postAggregateMiddleware(result) {
   }
 });
 
-/* ---------------------------- Indexes ----------------------------- */
+/* ================================================================== */
+/*  INDEXES                                                           */
+/*                                                                    */
+/*  Design rules:                                                     */
+/*    1. A compound index covers its prefixes — never declare both.   */
+/*    2. Partial indexes on `isSecret: true` so secrets don't bloat.  */
+/*    3. Every index must serve a real query in the app.              */
+/*    4. `_id`, `slug`, `name`, `secretCode` are field-level unique   */
+/*       indexes — do NOT redeclare them here.                        */
+/* ================================================================== */
 
-tourSchema.index({ isSecret: 1 });
-tourSchema.index({ secretAccessLevel: 1 });
-tourSchema.index({ secretReleaseDate: 1 });
-tourSchema.index({ secretExpiryDate: 1 });
-tourSchema.index({ secretWhitelist: 1 });
-tourSchema.index({ secretBookings: 1, secretMaxBookings: 1 });
-tourSchema.index({ isSecret: 1, secretAccessLevel: 1 });
-tourSchema.index({ isSecret: 1, secretReleaseDate: 1, secretExpiryDate: 1 });
-tourSchema.index({ isSecret: 1, secretBookings: 1, secretMaxBookings: 1 });
-tourSchema.index({ secretAccessLevel: 1, secretReleaseDate: 1 });
-tourSchema.index({ price: 1, ratingsAverage: -1 });
-tourSchema.index({ startDates: 1 });
-tourSchema.index({ difficulty: 1 });
-tourSchema.index({ duration: 1 });
-tourSchema.index({ name: "text", summary: "text", description: "text" });
-tourSchema.index({ category: 1 });
-tourSchema.index({ featured: 1, ratingsAverage: -1 });
-tourSchema.index({ isActive: 1, createdAt: -1 });
-tourSchema.index({ guides: 1 });
-tourSchema.index({ "guideDetails.leadGuide": 1 });
-tourSchema.index({ "guideDetails.guideAssignments.guideId": 1 });
-tourSchema.index({ "guideDetails.guideAssignments.role": 1 });
-tourSchema.index({ "guideDetails.requirements.minGuides": 1 });
-tourSchema.index({ "guideDetails.requirements.maxGuides": 1 });
-tourSchema.index({ "guideDetails.requirements.requiredLanguages": 1 });
-tourSchema.index({ "guideDetails.performance.rating": 1 });
-tourSchema.index({ "guideDetails.compensation.type": 1 });
-tourSchema.index({ "guideDetails.scheduling.backupGuides": 1 });
-tourSchema.index({ "guideRatings.guideId": 1 });
-tourSchema.index({ "itinerary.assignedGuides.guideId": 1 });
-tourSchema.index({ guides: 1, isActive: 1 });
-tourSchema.index({ "guideDetails.leadGuide": 1, isActive: 1 });
-tourSchema.index({ guides: 1, startDates: 1 });
-tourSchema.index({ "guideDetails.leadGuide": 1, startDates: 1 });
-tourSchema.index({ "location.coordinates": "2dsphere" });
-tourSchema.index({ "locations.coordinates": "2dsphere" });
-tourSchema.index(
-  { "location.coordinates": "2dsphere", "locations.coordinates": "2dsphere" },
-  { sparse: true },
-);
-tourSchema.index({ "location.city": 1 });
-tourSchema.index({ "location.country": 1 });
-tourSchema.index({ "location.region": 1 });
-tourSchema.index({ "location.address": "text" });
-tourSchema.index({ "locations.city": 1 });
-tourSchema.index({ "locations.country": 1 });
-tourSchema.index({ "locations.region": 1 });
-tourSchema.index({ "locations.address": "text" });
-tourSchema.index({ "geoFence.radius": 1 });
-tourSchema.index({ isActive: 1, featured: 1, ratingsAverage: -1 });
-tourSchema.index({ category: 1, price: 1, duration: 1 });
+/* #1 CORE — every Tour.find() via the pre-find hook */
 tourSchema.index({ isActive: 1, isSecret: 1, createdAt: -1 });
-tourSchema.index({
-  "location.coordinates": "2dsphere",
-  price: 1,
-  ratingsAverage: -1,
-});
-tourSchema.index({
-  "locations.coordinates": "2dsphere",
-  price: 1,
-  ratingsAverage: -1,
-});
-tourSchema.index({ "location.coordinates": "2dsphere", category: 1 });
-tourSchema.index({ "locations.coordinates": "2dsphere", category: 1 });
-tourSchema.index({ "location.coordinates": "2dsphere", difficulty: 1 });
-tourSchema.index({ "locations.coordinates": "2dsphere", difficulty: 1 });
-tourSchema.index({ createdBy: 1 });
-tourSchema.index({ createdBy: 1, isActive: 1 });
+
+/* #2 SORT-FRIENDLY — cover the filters + user-chosen sort */
+tourSchema.index({ isActive: 1, isSecret: 1, price: 1 });
+tourSchema.index({ isActive: 1, isSecret: 1, ratingsAverage: -1 });
+tourSchema.index({ isActive: 1, isSecret: 1, ratingsQuantity: -1 });
+tourSchema.index({ isActive: 1, isSecret: 1, duration: 1 });
+
+/* #3 FILTER INDEXES */
+tourSchema.index({ category: 1, price: 1 });
+tourSchema.index({ difficulty: 1, price: 1 });
+tourSchema.index({ startDates: 1 });
+tourSchema.index({ priceDiscount: 1 }, { sparse: true });
+tourSchema.index({ featured: 1, ratingsAverage: -1 });
+
+/* #4 OWNERSHIP / GUIDE INDEXES */
 tourSchema.index({ createdBy: 1, isActive: 1, createdAt: -1 });
 tourSchema.index({ guides: 1, isActive: 1, createdAt: -1 });
+tourSchema.index({ "guideDetails.leadGuide": 1, isActive: 1, startDates: 1 });
+tourSchema.index({ "guideDetails.guideAssignments.guideId": 1 });
+tourSchema.index({ "guideDetails.guideAssignments.role": 1 });
+tourSchema.index({ "guideRatings.guideId": 1 });
+tourSchema.index({ "itinerary.assignedGuides.guideId": 1 });
+
+/* #5 GEO — only two 2dsphere indexes, one per coordinates path */
+tourSchema.index({ "location.coordinates": "2dsphere" });
+tourSchema.index({ "locations.coordinates": "2dsphere" });
+
+/* #6 LOCATION FILTERS */
+tourSchema.index({ "location.city": 1, "location.country": 1 });
+tourSchema.index({ "location.region": 1 });
+
+/* #7 SECRET-TOUR — PARTIAL indexes, only index isSecret:true rows */
+tourSchema.index(
+  { secretAccessLevel: 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+tourSchema.index(
+  { secretReleaseDate: 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+tourSchema.index(
+  { secretExpiryDate: 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+tourSchema.index(
+  { "secretWhitelist.userId": 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+tourSchema.index(
+  { isSecret: 1, secretBookings: 1, secretMaxBookings: 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+tourSchema.index(
+  { secretAccessLevel: 1, secretReleaseDate: 1 },
+  { partialFilterExpression: { isSecret: true } },
+);
+
+/* #8 TEXT SEARCH — only one text index per collection */
+tourSchema.index(
+  { name: "text", summary: "text", description: "text" },
+  {
+    weights: { name: 10, summary: 5, description: 1 },
+    name: "TourTextIndex",
+  },
+);
 
 /* ---------------------------- Statics ----------------------------- */
 
@@ -1426,8 +1429,6 @@ tourSchema.statics.getGuidePerformanceSummary =
       },
     ]);
   };
-
-/* -------------------------- Model export -------------------------- */
 
 const Tour = mongoose.models.Tour || mongoose.model("Tour", tourSchema);
 
