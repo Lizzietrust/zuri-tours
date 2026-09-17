@@ -17,6 +17,8 @@ import {
   getMyReviews,
   getTourReviews,
   getBatchTourReviews,
+  getMyReviewForTour,
+  updateMyReview,
 } from "../controllers/reviewController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
 import {
@@ -30,10 +32,21 @@ import {
 
 const router = express.Router({ mergeParams: true });
 
+/* ---------- Current user's own review for a specific tour ---------- */
+
+router
+  .route("/me/:tourId")
+  .get(protect, getMyReviewForTour)
+  .patch(protect, userUpdateLimiter, validateReview, updateMyReview);
+
+/* ---------- Root ---------- */
+
 router
   .route("/")
   .get(getAllReviews)
   .post(protect, reviewCreationLimiter, validateReview, createReview);
+
+/* ---------- Single review ---------- */
 
 router
   .route("/:id")
@@ -41,8 +54,14 @@ router
   .patch(protect, checkValidId, userUpdateLimiter, validateReview, updateReview)
   .delete(protect, checkValidId, deleteReview);
 
+/* ---------- Custom routes (order matters!) ---------- */
+
 router.route("/stats").get(getReviewStats);
 router.route("/public").get(getTourReviews);
+router.route("/my-reviews").get(protect, getMyReviews);
+router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
+
+/* ---------- Actions on a specific review ---------- */
 
 router
   .route("/:id/helpful")
@@ -84,12 +103,10 @@ router
   .route("/:id/restore")
   .patch(protect, authorize("admin"), checkValidId, restoreReview);
 
+/* ---------- Bulk ---------- */
+
 router
   .route("/bulk/delete")
   .delete(protect, authorize("admin"), bulkDeleteReviews);
-
-router.route("/my-reviews").get(protect, getMyReviews);
-
-router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
 
 export default router;
