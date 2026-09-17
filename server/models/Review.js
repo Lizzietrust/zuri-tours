@@ -113,6 +113,8 @@ reviewSchema.index(
   },
 );
 
+/* ---------------------------- Virtuals ---------------------------- */
+
 reviewSchema.virtual("formattedRating").get(function getFormattedRating() {
   const stars = "⭐".repeat(Math.floor(this.rating));
   const halfStar = this.rating % 1 >= 0.5 ? "½" : "";
@@ -141,6 +143,8 @@ reviewSchema.virtual("hasResponse").get(function getHasResponse() {
 reviewSchema.virtual("canBeHelpful").get(function getCanBeHelpful() {
   return this.status === "approved";
 });
+
+/* ---------------------------- Queries ----------------------------- */
 
 reviewSchema.query = {
   byTour(tourId) {
@@ -253,12 +257,33 @@ reviewSchema.query = {
   },
 };
 
+/* ================================================================== */
+/*  STATICS — average rating calculation                              */
+/* ================================================================== */
+
+/**
+ * Recalculate and persist a tour's `ratingsAverage` / `ratingsQuantity`
+ * based on its APPROVED reviews only. Safe to call with an undefined
+ * or invalid tourId — it simply no-ops.
+ *
+ * @param {ObjectId|string} tourId
+ * @returns {Promise<Object|null>} The aggregation stat block, or null
+ */
 reviewSchema.statics.calcAverageRatings = async function calcAverageRatings(
   tourId,
 ) {
+  if (!tourId || !mongoose.Types.ObjectId.isValid(tourId)) {
+    return null;
+  }
+
   try {
     const stats = await this.aggregate([
-      { $match: { tour: tourId, status: "approved" } },
+      {
+        $match: {
+          tour: new mongoose.Types.ObjectId(tourId),
+          status: "approved",
+        },
+      },
       {
         $group: {
           _id: "$tour",
@@ -272,15 +297,23 @@ reviewSchema.statics.calcAverageRatings = async function calcAverageRatings(
     ]);
 
     if (stats.length > 0) {
-      await Tour.findByIdAndUpdate(tourId, {
-        ratingsQuantity: stats[0].nRating,
-        ratingsAverage: Math.round(stats[0].avgRating * 10) / 10,
-      });
+      await Tour.findByIdAndUpdate(
+        tourId,
+        {
+          ratingsQuantity: stats[0].nRating,
+          ratingsAverage: Math.round(stats[0].avgRating * 10) / 10,
+        },
+        { runValidators: false, new: true },
+      );
     } else {
-      await Tour.findByIdAndUpdate(tourId, {
-        ratingsQuantity: 0,
-        ratingsAverage: 4.5,
-      });
+      await Tour.findByIdAndUpdate(
+        tourId,
+        {
+          ratingsQuantity: 0,
+          ratingsAverage: 4.5,
+        },
+        { runValidators: false, new: true },
+      );
     }
 
     return stats[0] || null;
@@ -289,6 +322,29 @@ reviewSchema.statics.calcAverageRatings = async function calcAverageRatings(
     throw error;
   }
 };
+
+/**
+ * Bulk-recalculate averages for many tours at once.
+ * Useful after a bulk delete or bulk approve.
+ *
+ * @param {ObjectId[]|string[]} tourIds
+ */
+reviewSchema.statics.calcAverageRatingsForTours =
+  async function calcAverageRatingsForTours(tourIds) {
+    if (!Array.isArray(tourIds) || tourIds.length === 0) return [];
+
+    const uniqueIds = [...new Set(tourIds.map((id) => String(id)))]
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    if (uniqueIds.length === 0) return [];
+
+    const results = await Promise.all(
+      uniqueIds.map((id) => this.calcAverageRatings(id)),
+    );
+
+    return results.filter(Boolean);
+  };
 
 reviewSchema.statics.getReviewStats = async function getReviewStats(tourId) {
   const stats = await this.aggregate([
@@ -422,6 +478,8 @@ reviewSchema.statics.getReviewsByDateRange =
     return results;
   };
 
+/* --------------------------- Methods ------------------------------ */
+
 reviewSchema.methods.markHelpful = async function markHelpful() {
   this.helpfulCount += 1;
   await this.save();
@@ -457,14 +515,12 @@ reviewSchema.methods.flagReview = async function flagReview(
 reviewSchema.methods.approve = async function approve() {
   this.status = "approved";
   await this.save();
-  await this.constructor.calcAverageRatings(this.tour);
 
   return this;
 };
 reviewSchema.methods.reject = async function reject() {
   this.status = "rejected";
   await this.save();
-  await this.constructor.calcAverageRatings(this.tour);
 
   return this;
 };
@@ -483,13 +539,12 @@ reviewSchema.methods.editReview = async function editReview(
   this.review = newReview;
   this.rating = newRating;
   await this.save();
-  await this.constructor.calcAverageRatings(this.tour);
 
   return this;
 };
 
 /* ================================================================== */
-/*  MIDDLEWARE — pre hooks are `next`-free                            */
+/*  MIDDLEWARE — recalc only when it matters                          */
 /* ================================================================== */
 
 reviewSchema.pre("save", function preSaveMiddleware() {
@@ -498,36 +553,43 @@ reviewSchema.pre("save", function preSaveMiddleware() {
   }
 });
 
+/**
+ * Recalculate the tour's average rating after a review is saved.
+ * Only runs when something that can affect the average changed:
+ *   - the review is new (`isNew`), OR
+ *   - `rating`, `status`, or `tour` were modified.
+ * This prevents pointless recalcs from `markHelpful`, `addResponse`, etc.
+ */
 reviewSchema.post("save", async function handleSavePost() {
   try {
+    const affectsAverage =
+      this.isNew ||
+      this.isModified("rating") ||
+      this.isModified("status") ||
+      this.isModified("tour");
+
+    if (!affectsAverage) return;
+
     await this.constructor.calcAverageRatings(this.tour);
   } catch (error) {
     console.error("Error updating tour ratings after save:", error);
   }
 });
 
+/**
+ * Recalculate after `findOneAndUpdate` / `findByIdAndUpdate`.
+ * The hook receives the pre-update doc as first arg and the updated
+ * doc (with `new: true`) as second. We use `doc.tour` — both carry it.
+ */
 reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   try {
-    if (doc) {
+    if (doc && doc.tour) {
       await doc.constructor.calcAverageRatings(doc.tour);
     }
   } catch (error) {
     console.error("Error updating tour ratings after update:", error);
   }
 });
-
-reviewSchema.post(
-  "findOneAndDelete",
-  async function handleFindOneAndDelete(doc) {
-    try {
-      if (doc) {
-        await doc.constructor.calcAverageRatings(doc.tour);
-      }
-    } catch (error) {
-      console.error("Error updating tour ratings after delete:", error);
-    }
-  },
-);
 
 reviewSchema.pre("find", function preFindMiddleware() {
   if (!this._includeAll && !this._skipStatusFilter) {
