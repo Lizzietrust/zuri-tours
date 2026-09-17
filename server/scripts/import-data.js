@@ -31,6 +31,8 @@ const connectDB = async () => {
   }
 };
 
+/* ---------- File paths ---------- */
+
 const usersFilePath = path.join(__dirname, "../dev-data/users.json");
 const toursFilePath = path.join(__dirname, "../dev-data/tours.json");
 const reviewsFilePath = path.join(__dirname, "../dev-data/reviews.json");
@@ -50,15 +52,19 @@ for (const file of requiredFiles) {
 
 const readJSON = (filePath) => JSON.parse(fs.readFileSync(filePath, "utf-8"));
 
+/* ---------- Import ---------- */
+
 const importData = async () => {
   await connectDB();
 
   try {
+    /* 1. Wipe existing data */
     await Review.deleteMany();
     await Tour.deleteMany();
     await User.deleteMany();
     console.log("🗑️  Cleared existing reviews, tours, and users");
 
+    /* 2. Import users (one-by-one so password hashing + validation runs) */
     const usersData = readJSON(usersFilePath);
     const createdUsers = [];
 
@@ -71,12 +77,14 @@ const importData = async () => {
     }
     console.log(`✅ Imported ${createdUsers.length} users`);
 
+    /* email -> user _id */
     const userByEmail = new Map();
 
     createdUsers.forEach((u) =>
       userByEmail.set(String(u.email).toLowerCase(), u._id),
     );
 
+    /* 3. Normalize & import tours */
     const toursData = readJSON(toursFilePath);
 
     const normalizedTours = toursData.map((tour, i) => {
@@ -88,12 +96,14 @@ const importData = async () => {
           `Tour #${i} ("${tour.name}") references unknown createdByEmail: ${tour.createdByEmail}`,
         );
       }
+
       if (!tour.location || !Array.isArray(tour.location.coordinates)) {
         throw new Error(
           `Tour #${i} ("${tour.name}") is missing location.coordinates`,
         );
       }
 
+      /* Strip helper/system fields so they don't leak into the model. */
       const { createdByEmail: _createdByEmail, _id, id: _id2, ...rest } = tour;
 
       return {
@@ -111,10 +121,17 @@ const importData = async () => {
 
     console.log(`✅ Imported ${createdTours.length} tours`);
 
+    /* slug -> tour _id */
     const tourBySlug = new Map();
 
     createdTours.forEach((t) => tourBySlug.set(t.slug, t._id));
 
+    /* 4. Normalize & import reviews
+       Each review is created with `$locals.allowDuplicate = true` so the
+       schema's duplicate-check `pre("save")` hook is skipped during
+       seeding. The compound unique index `{ tour, user }` is still
+       enforced by MongoDB — the bypass only skips the application-level
+       pre-check that the schema normally runs. */
     const reviewsData = readJSON(reviewsFilePath);
 
     const remappedReviews = reviewsData.map((review, i) => {
@@ -143,10 +160,20 @@ const importData = async () => {
       };
     });
 
-    const createdReviews = await Review.create(remappedReviews);
+    const createdReviews = [];
+
+    for (const data of remappedReviews) {
+      const review = new Review(data);
+
+      review.$locals.allowDuplicate = true;
+      // eslint-disable-next-line no-await-in-loop
+      await review.save();
+      createdReviews.push(review);
+    }
 
     console.log(`✅ Imported ${createdReviews.length} reviews`);
 
+    /* 5. Sanity counts */
     const [u, t, r] = await Promise.all([
       User.countDocuments(),
       Tour.countDocuments(),
@@ -159,20 +186,26 @@ const importData = async () => {
     process.exit(0);
   } catch (error) {
     console.error("❌ Error importing data:", error.message);
+
     if (error.errors) {
       Object.values(error.errors).forEach((e) =>
         console.error(`   → ${e.path}: ${e.message}`),
       );
     }
+
     if (error.name === "ValidationError") {
       console.error("   Validation details:", error.message);
     }
+
     process.exit(1);
   }
 };
 
+/* ---------- Delete ---------- */
+
 const deleteData = async () => {
   await connectDB();
+
   try {
     await Review.deleteMany();
     await Tour.deleteMany();
@@ -184,6 +217,8 @@ const deleteData = async () => {
     process.exit(1);
   }
 };
+
+/* ---------- CLI ---------- */
 
 const args = process.argv.slice(2);
 
