@@ -196,18 +196,22 @@ const createReview = createOne(Review, {
       throw new AppError("Please provide review text and rating", 400);
     }
 
+    if (!tourId) {
+      throw new AppError("Tour ID is required", 400);
+    }
+
     const tour = await Tour.findById(tourId);
 
     if (!tour) {
       throw new AppError("Tour not found", 404);
     }
 
-    const existingReview = await Review.findOne({
-      tour: tourId,
-      user: req.user._id,
-    });
+    const alreadyReviewed = await Review.hasUserReviewedTour(
+      req.user._id,
+      tourId,
+    );
 
-    if (existingReview) {
+    if (alreadyReviewed) {
       throw new AppError("You have already reviewed this tour", 400);
     }
 
@@ -244,7 +248,7 @@ const createReview = createOne(Review, {
 });
 
 /* ============================================================
-   UPDATE FACTORY HANDLER
+   UPDATE FACTORY HANDLER (existing — admin/owner path)
    ============================================================ */
 
 const updateReview = updateOne(Review, {
@@ -438,6 +442,10 @@ const getReview = getOne(Review, {
     return popOpts;
   },
 });
+
+/* ============================================================
+   CUSTOM HANDLERS
+   ============================================================ */
 
 const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
@@ -850,6 +858,93 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
 });
 
 /* ============================================================
+   DUPLICATE-PREVENTION HELPERS — new custom handlers
+   ============================================================ */
+
+/**
+ * GET /reviews/me/:tourId
+ * Returns the current user's review for a specific tour (populated).
+ * 404 if the user has not reviewed the tour yet.
+ */
+const getMyReviewForTour = catchAsync(async (req, res, next) => {
+  const tourId = req.params.tourId || req.params.id;
+
+  if (!tourId) {
+    return next(new AppError("Tour ID is required", 400));
+  }
+
+  const review = await Review.getUserReviewForTourPopulated(
+    req.user._id,
+    tourId,
+  );
+
+  if (!review) {
+    return next(new AppError("You have not reviewed this tour yet", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    data: { review },
+  });
+});
+
+/**
+ * PATCH /reviews/me/:tourId
+ * Update the current user's review for a specific tour.
+ * Uses the schema's `editReview` method so `editHistory` is preserved
+ * and `status` is reset to "pending" if the review was approved.
+ */
+const updateMyReview = catchAsync(async (req, res, next) => {
+  const tourId = req.params.tourId || req.params.id;
+
+  if (!tourId) {
+    return next(new AppError("Tour ID is required", 400));
+  }
+
+  const review = await Review.findOne({
+    user: req.user._id,
+    tour: tourId,
+  });
+
+  if (!review) {
+    return next(new AppError("You have not reviewed this tour yet", 404));
+  }
+
+  if (review.status === "rejected" || review.status === "flagged") {
+    return next(new AppError("This review cannot be edited", 400));
+  }
+
+  const newReview = req.body.review ?? review.review;
+  const newRating = req.body.rating ?? review.rating;
+
+  if (newRating < 1 || newRating > 5) {
+    return next(new AppError("Rating must be between 1 and 5", 400));
+  }
+
+  await review.editReview(newReview, newRating, req.user._id);
+
+  const populatedReview = await populateReviewFields(
+    Review.findById(review._id),
+    {
+      populateUser: true,
+      populateTour: true,
+    },
+  ).lean();
+
+  res.status(200).json({
+    status: "success",
+    message: "Review updated successfully",
+    data: { review: populatedReview },
+  });
+});
+
+/**
+ * GET /reviews/me
+ * Currently provided by getMyReviews above.
+ * This is just an alias export name for clarity.
+ */
+
+/* ============================================================
    EXPORTS
    ============================================================ */
 
@@ -871,4 +966,6 @@ export {
   getTourReviews,
   getMyReviews,
   getBatchTourReviews,
+  getMyReviewForTour,
+  updateMyReview,
 };
