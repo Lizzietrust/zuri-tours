@@ -16,6 +16,10 @@ import {
   getOne,
 } from "../utils/handlerFactory.js";
 
+/* ============================================================
+   POPULATION HELPERS
+   ============================================================ */
+
 const populateGuideFields = (query, populateOptions = {}) => {
   const {
     populateGuides = true,
@@ -126,6 +130,53 @@ const populateGuideFields = (query, populateOptions = {}) => {
   return populatedQuery;
 };
 
+/* ============================================================
+   "HAS USER REVIEWED" ENRICHMENT
+   ============================================================ */
+
+/**
+ * Given an array of tour documents (lean or hydrated) and a user id,
+ * return a new array where each tour has a `hasUserReviewed` boolean
+ * and (optionally) the user's review for that tour inlined.
+ */
+async function attachUserReviewFlags(
+  tours,
+  userId,
+  { inlineReview = false } = {},
+) {
+  if (!userId || !Array.isArray(tours) || tours.length === 0) {
+    return tours.map((t) => ({ ...t, hasUserReviewed: false }));
+  }
+
+  const tourIds = tours.map((t) => t._id ?? t.id);
+
+  const userReviews = await Review.find({
+    user: userId,
+    tour: { $in: tourIds },
+  })
+    .select("tour rating review createdAt status")
+    .lean();
+
+  const reviewByTour = new Map(userReviews.map((r) => [String(r.tour), r]));
+
+  return tours.map((t) => {
+    const key = String(t._id ?? t.id);
+    const userReview = reviewByTour.get(key);
+
+    return {
+      ...t,
+      hasUserReviewed: !!userReview,
+      ...(inlineReview && userReview
+        ? { userReview: { ...userReview, tour: key } }
+        : {}),
+    };
+  });
+}
+
+/* ============================================================
+   DELETE FACTORY HANDLERS
+   ============================================================ */
+
 const deleteTour = cascadeDeleteOne(Tour, {
   modelName: "Tour",
   idParam: "id",
@@ -198,7 +249,11 @@ const bulkDeleteTours = deleteMany(Tour, {
   },
 });
 
-const getAllTours = getAll(Tour, {
+/* ============================================================
+   READ FACTORY HANDLERS
+   ============================================================ */
+
+const getAllToursFactory = getAll(Tour, {
   modelName: "Tour",
   searchFields: ["name", "summary", "description", "location"],
   allowedFilters: ["difficulty", "price", "ratingsAverage", "duration"],
@@ -344,9 +399,38 @@ const getAllTours = getAll(Tour, {
 });
 
 /**
- * Get a single tour by ID or slug
+ * Wraps the factory-produced `getAllTours` so we can enrich the
+ * response with a `hasUserReviewed` flag per tour.
  */
-const getTour = getOne(Tour, {
+const getAllTours = catchAsync((req, res, next) => {
+  const originalJson = res.json.bind(res);
+
+  res.json = async (payload) => {
+    try {
+      if (
+        payload &&
+        payload.status === "success" &&
+        Array.isArray(payload?.data?.tours) &&
+        req.user
+      ) {
+        payload.data.tours = await attachUserReviewFlags(
+          payload.data.tours,
+          req.user._id,
+        );
+      }
+    } catch (err) {
+      console.error("attachUserReviewFlags failed:", err.message);
+    }
+
+    res.json = originalJson;
+
+    return originalJson(payload);
+  };
+
+  return getAllToursFactory(req, res, next);
+});
+
+const getTourFactory = getOne(Tour, {
   modelName: "Tour",
   allowSlug: true,
   slugField: "slug",
@@ -500,8 +584,42 @@ const getTour = getOne(Tour, {
 });
 
 /**
- * Create a new tour
+ * Wraps the factory-produced `getTour` so we can add a
+ * `hasUserReviewed` flag (and optionally inline the review).
  */
+const getTour = catchAsync((req, res, next) => {
+  const originalJson = res.json.bind(res);
+
+  res.json = async (payload) => {
+    try {
+      const tourDoc = payload?.data?.tour || payload?.data?.document;
+
+      if (payload && payload.status === "success" && tourDoc && req.user) {
+        const [enriched] = await attachUserReviewFlags(
+          [tourDoc],
+          req.user._id,
+          { inlineReview: req.query.inlineReview === "true" },
+        );
+
+        if (payload.data.tour) payload.data.tour = enriched;
+        else if (payload.data.document) payload.data.document = enriched;
+      }
+    } catch (err) {
+      console.error("attachUserReviewFlags (single) failed:", err.message);
+    }
+
+    res.json = originalJson;
+
+    return originalJson(payload);
+  };
+
+  return getTourFactory(req, res, next);
+});
+
+/* ============================================================
+   OTHER HANDLERS (unchanged)
+   ============================================================ */
+
 const createTour = createOne(Tour, {
   modelName: "Tour",
   populateOptions: [
@@ -646,6 +764,12 @@ const updateTour = updateOne(Tour, {
   },
 });
 
+/* ============================================================
+   HANDLERS THAT REMAIN UNCHANGED
+   (getTourWithReviews, price/difficulty/rating/duration,
+    searchTours, getTourStats, getMonthlyPlan, guide assignment)
+   ============================================================ */
+
 const getTourWithReviews = catchAsync(async (req, res) => {
   const { id } = req.params;
   const {
@@ -748,9 +872,8 @@ const getTourWithReviews = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tours by price range
- */
+/* (all other handlers from your file, unchanged) */
+
 const getToursByPriceRange = catchAsync(async (req, res) => {
   const minPrice = parseInt(req.query.min, 10) || 0;
   const maxPrice = parseInt(req.query.max, 10) || 10000;
@@ -790,9 +913,6 @@ const getToursByPriceRange = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get top cheap tours
- */
 const getTopCheapTours = catchAsync(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 5;
   const populateGuides = req.query.populateGuides !== "false";
@@ -827,9 +947,6 @@ const getTopCheapTours = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tours by difficulty
- */
 const getToursByDifficulty = catchAsync(async (req, res) => {
   const { level } = req.params;
   const validLevels = ["easy", "medium", "difficult"];
@@ -872,9 +989,6 @@ const getToursByDifficulty = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tours by rating
- */
 const getToursByRating = catchAsync(async (req, res) => {
   const minRating = parseFloat(req.query.minRating) || 4.5;
   const limit = parseInt(req.query.limit, 10) || 10;
@@ -912,9 +1026,6 @@ const getToursByRating = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tours by duration
- */
 const getToursByDuration = catchAsync(async (req, res) => {
   const maxDuration = parseInt(req.query.maxDuration, 10) || 7;
   const limit = parseInt(req.query.limit, 10) || 10;
@@ -952,9 +1063,6 @@ const getToursByDuration = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Search tours
- */
 const searchTours = catchAsync(async (req, res) => {
   const {
     q,
@@ -1012,9 +1120,6 @@ const searchTours = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get tour statistics
- */
 const getTourStats = catchAsync(async (req, res) => {
   const [stats, overallStats] = await Promise.all([
     Tour.aggregate([
@@ -1068,9 +1173,6 @@ const getTourStats = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get monthly plan
- */
 const getMonthlyPlan = catchAsync(async (req, res) => {
   const year = parseInt(req.params.year, 10) || new Date().getFullYear();
 
@@ -1188,9 +1290,6 @@ const assignGuide = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Assign multiple guides to a tour
- */
 const assignMultipleGuides = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideAssignments } = req.body;
@@ -1288,9 +1387,6 @@ const assignMultipleGuides = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Remove a guide from a tour
- */
 const removeGuide = catchAsync(async (req, res) => {
   const { id: tourId, guideId } = req.params;
 
@@ -1344,9 +1440,6 @@ const removeGuide = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get assigned tours for a user
- */
 const getAssignedTours = catchAsync(async (req, res) => {
   const populateGuides = req.query.populateGuides !== "false";
   const populateGuideDetails = req.query.populateGuideDetails === "true";
@@ -1397,9 +1490,6 @@ const getAssignedTours = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Set lead guide
- */
 const setLeadGuide = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideId } = req.body;
@@ -1451,9 +1541,6 @@ const setLeadGuide = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Get guide details
- */
 const getGuideDetails = catchAsync(async (req, res) => {
   const { id: tourId, guideId } = req.params;
 
@@ -1540,9 +1627,6 @@ const getGuideDetails = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * Add guide rating
- */
 const addGuideRating = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
   const { guideId, rating, review, categories } = req.body;
