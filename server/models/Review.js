@@ -93,7 +93,18 @@ const reviewSchema = new mongoose.Schema(
   },
 );
 
+/* ================================================================== */
+/*  INDEXES — the unique compound index is what enforces one review   */
+/*  per user per tour at the DATABASE level.                          */
+/* ================================================================== */
+
+/**
+ * #1 CRITICAL — one review per user per tour.
+ * MongoDB will reject any second insert with `E11000 duplicate key`.
+ * This is the ultimate source of truth for duplicate prevention.
+ */
 reviewSchema.index({ tour: 1, user: 1 }, { unique: true });
+
 reviewSchema.index({ tour: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, createdAt: -1 });
 reviewSchema.index({ rating: -1 });
@@ -261,14 +272,6 @@ reviewSchema.query = {
 /*  STATICS — average rating calculation                              */
 /* ================================================================== */
 
-/**
- * Recalculate and persist a tour's `ratingsAverage` / `ratingsQuantity`
- * based on its APPROVED reviews only. Safe to call with an undefined
- * or invalid tourId — it simply no-ops.
- *
- * @param {ObjectId|string} tourId
- * @returns {Promise<Object|null>} The aggregation stat block, or null
- */
 reviewSchema.statics.calcAverageRatings = async function calcAverageRatings(
   tourId,
 ) {
@@ -323,12 +326,6 @@ reviewSchema.statics.calcAverageRatings = async function calcAverageRatings(
   }
 };
 
-/**
- * Bulk-recalculate averages for many tours at once.
- * Useful after a bulk delete or bulk approve.
- *
- * @param {ObjectId[]|string[]} tourIds
- */
 reviewSchema.statics.calcAverageRatingsForTours =
   async function calcAverageRatingsForTours(tourIds) {
     if (!Array.isArray(tourIds) || tourIds.length === 0) return [];
@@ -345,6 +342,86 @@ reviewSchema.statics.calcAverageRatingsForTours =
 
     return results.filter(Boolean);
   };
+
+/* ================================================================== */
+/*  STATICS — DUPLICATE PREVENTION HELPERS                            */
+/* ================================================================== */
+
+/**
+ * Check whether a user has already reviewed a given tour.
+ * Cheaper than a full query — uses `exists()` under the hood.
+ *
+ * @param {ObjectId|string} userId
+ * @param {ObjectId|string} tourId
+ * @returns {Promise<boolean>}
+ */
+reviewSchema.statics.hasUserReviewedTour = async function hasUserReviewedTour(
+  userId,
+  tourId,
+) {
+  if (
+    !userId ||
+    !tourId ||
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !mongoose.Types.ObjectId.isValid(tourId)
+  ) {
+    return false;
+  }
+
+  const existing = await this.exists({ user: userId, tour: tourId });
+
+  return !!existing;
+};
+
+/**
+ * Fetch a user's review for a specific tour, or null.
+ *
+ * @param {ObjectId|string} userId
+ * @param {ObjectId|string} tourId
+ * @returns {Promise<Document|null>}
+ */
+reviewSchema.statics.getUserReviewForTour = function getUserReviewForTour(
+  userId,
+  tourId,
+) {
+  return this.findOne({ user: userId, tour: tourId });
+};
+
+/**
+ * Fetch a user's review for a specific tour WITH the user and tour
+ * documents populated. Useful when you want to render an "edit your
+ * review" form directly.
+ */
+reviewSchema.statics.getUserReviewForTourPopulated =
+  function getUserReviewForTourPopulated(userId, tourId) {
+    return this.findOne({ user: userId, tour: tourId })
+      .populate({ path: "user", select: "name email profileImage" })
+      .populate({
+        path: "tour",
+        select: "name slug imageCover price duration difficulty",
+      })
+      .lean();
+  };
+
+/**
+ * Return an array of tour ids that a given user has already reviewed.
+ * Useful for rendering "you already reviewed these" badges on a list
+ * of tours.
+ *
+ * @param {ObjectId|string} userId
+ * @returns {Promise<ObjectId[]>}
+ */
+reviewSchema.statics.getReviewedTourIds = async function getReviewedTourIds(
+  userId,
+) {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return [];
+
+  const reviews = await this.find({ user: userId }, { tour: 1 }).lean();
+
+  return reviews.map((r) => r.tour);
+};
+
+/* --------------------------- Aggregate statics -------------------- */
 
 reviewSchema.statics.getReviewStats = async function getReviewStats(tourId) {
   const stats = await this.aggregate([
@@ -543,43 +620,107 @@ reviewSchema.methods.editReview = async function editReview(
   return this;
 };
 
-/* ================================================================== */
-/*  MIDDLEWARE — recalc only when it matters                          */
-/* ================================================================== */
-
-reviewSchema.pre("save", function preSaveMiddleware() {
+reviewSchema.pre("save", async function preSaveMiddleware() {
   if (this.rating < 1 || this.rating > 5) {
     throw new Error("Rating must be between 1 and 5");
   }
+
+  if (!this.isNew) return;
+
+  if (this.$locals?.allowDuplicate === true) return;
+
+  if (!this.tour || !this.user) return;
+
+  const existing = await this.constructor.exists({
+    tour: this.tour,
+    user: this.user,
+  });
+
+  if (existing) {
+    const err = new mongoose.Error.ValidationError(this);
+
+    err.addError(
+      "tour",
+      new mongoose.Error.ValidatorError({
+        path: "tour",
+        message: "You have already reviewed this tour",
+        kind: "DuplicateReview",
+      }),
+    );
+    throw err;
+  }
+});
+
+reviewSchema.post("save", function postSaveDuplicateMapper(err, doc, next) {
+  if (!err) return next();
+
+  if (err.code === 11000 && err.keyPattern?.tour && err.keyPattern?.user) {
+    const validationErr = new mongoose.Error.ValidationError(doc);
+
+    validationErr.addError(
+      "tour",
+      new mongoose.Error.ValidatorError({
+        path: "tour",
+        message: "You have already reviewed this tour",
+        kind: "DuplicateReview",
+      }),
+    );
+
+    return next(validationErr);
+  }
+
+  return next(err);
 });
 
 /**
  * Recalculate the tour's average rating after a review is saved.
- * Only runs when something that can affect the average changed:
- *   - the review is new (`isNew`), OR
- *   - `rating`, `status`, or `tour` were modified.
- * This prevents pointless recalcs from `markHelpful`, `addResponse`, etc.
+ * Only runs when something that can affect the average changed.
  */
-reviewSchema.post("save", async function handleSavePost() {
+reviewSchema.post("save", async function handleSavePost(doc) {
+  if (!doc || !doc.tour) return;
+
   try {
     const affectsAverage =
-      this.isNew ||
-      this.isModified("rating") ||
-      this.isModified("status") ||
-      this.isModified("tour");
+      doc.isNew ||
+      doc.isModified("rating") ||
+      doc.isModified("status") ||
+      doc.isModified("tour");
 
     if (!affectsAverage) return;
 
-    await this.constructor.calcAverageRatings(this.tour);
+    await doc.constructor.calcAverageRatings(doc.tour);
   } catch (error) {
     console.error("Error updating tour ratings after save:", error);
   }
 });
 
+reviewSchema.pre("findOneAndUpdate", async function preFindOneAndUpdate() {
+  const update = this.getUpdate() || {};
+  const filter = this.getFilter();
+
+  const newTour = update.tour || update.$set?.tour;
+  const newUser = update.user || update.$set?.user;
+
+  if (!newTour && !newUser) return;
+
+  const tour = newTour || filter.tour;
+  const user = newUser || filter.user;
+
+  if (!tour || !user) return;
+
+  const existing = await this.model.exists({
+    tour,
+    user,
+    _id: { $ne: filter._id },
+  });
+
+  if (existing) {
+    throw new Error("You have already reviewed this tour");
+  }
+});
+
 /**
  * Recalculate after `findOneAndUpdate` / `findByIdAndUpdate`.
- * The hook receives the pre-update doc as first arg and the updated
- * doc (with `new: true`) as second. We use `doc.tour` — both carry it.
  */
 reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   try {
@@ -596,6 +737,8 @@ reviewSchema.pre("find", function preFindMiddleware() {
     this.where("status").equals("approved");
   }
 });
+
+/* ---------------------------- Statics ----------------------------- */
 
 reviewSchema.statics.getAllForTour = function getAllForTour(
   tourId,
@@ -626,13 +769,6 @@ reviewSchema.statics.getAllForTour = function getAllForTour(
   }
 
   return query.lean();
-};
-
-reviewSchema.statics.getUserReviewForTour = function getUserReviewForTour(
-  userId,
-  tourId,
-) {
-  return this.findOne({ user: userId, tour: tourId });
 };
 
 reviewSchema.statics.getTopReviews = function getTopReviews(limit = 5) {
