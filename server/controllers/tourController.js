@@ -17,6 +17,12 @@ import {
 } from "../utils/handlerFactory.js";
 
 /* ============================================================
+   GEOSPATIAL HANDLERS
+   ============================================================ */
+
+import geoService from "../services/geoService.js";
+
+/* ============================================================
    POPULATION HELPERS
    ============================================================ */
 
@@ -1695,6 +1701,234 @@ const addGuideRating = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * GET /tours/within/:distance/center/:latlng/unit/:unit
+ *
+ * Classic radius query:
+ *   /tours/within/50/center/40.7128,-74.0060/unit/km
+ *
+ * Optional query params:
+ *   - difficulty   (filter)
+ *   - minPrice, maxPrice (filter)
+ *   - page, limit
+ *   - populateReviews=true/false
+ *   - populateGuides=true/false
+ */
+const getToursWithin = catchAsync(async (req, res, next) => {
+  const { distance, latlng, unit } = req.params;
+
+  if (!distance || !latlng || !unit) {
+    return next(
+      new AppError(
+        "Please provide distance, center coordinates (lat,lng) and unit",
+        400,
+      ),
+    );
+  }
+
+  const { lng, lat } = geoService.parseLatLng(latlng);
+  const radiusMeters = geoService.convertToMeters(distance, unit);
+
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+
+  const filter = {};
+
+  if (req.query.difficulty) {
+    filter.difficulty = req.query.difficulty;
+  }
+
+  if (req.query.minPrice || req.query.maxPrice) {
+    filter.price = {};
+    if (req.query.minPrice) {
+      filter.price.$gte = Number(req.query.minPrice);
+    }
+    if (req.query.maxPrice) {
+      filter.price.$lte = Number(req.query.maxPrice);
+    }
+  }
+
+  if (req.query.category) {
+    filter.category = req.query.category;
+  }
+
+  const { tours, total, center, radius } =
+    await geoService.findToursWithinRadius({
+      lng,
+      lat,
+      radiusMeters,
+      unit,
+      limit,
+      page,
+      filter,
+    });
+
+  let finalTours = tours;
+
+  if (
+    req.query.populateReviews === "true" ||
+    req.query.populateGuides === "true"
+  ) {
+    let query = Tour.find({ _id: { $in: tours.map((t) => t._id) } });
+
+    if (req.query.populateGuides === "true") {
+      query = query
+        .populate({
+          path: "guides",
+          select: "name email role profileImage",
+        })
+        .populate({
+          path: "guideDetails.leadGuide",
+          select: "name email role profileImage",
+        });
+    }
+
+    if (req.query.populateReviews === "true") {
+      query = query.populate({
+        path: "reviews",
+        options: { limit: 3, sort: "-createdAt" },
+        populate: {
+          path: "user",
+          select: "name email profileImage",
+        },
+      });
+    }
+
+    const populated = await query.lean();
+
+    const byId = new Map(populated.map((t) => [String(t._id), t]));
+    const distMap = new Map(tours.map((t) => [String(t._id), t]));
+
+    finalTours = tours.map((t) => {
+      const enriched = byId.get(String(t._id));
+      const dist = distMap.get(String(t._id));
+
+      return {
+        ...(enriched || t),
+        distance: dist?.distance ?? null,
+        distanceUnit: dist?.distanceUnit,
+        distanceInMeters: dist?.distanceInMeters,
+      };
+    });
+  }
+
+  res.status(200).json({
+    status: "success",
+    results: finalTours.length,
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    data: {
+      center,
+      radius,
+      tours: finalTours,
+    },
+  });
+});
+
+/**
+ * GET /tours/near?lat=&lng=&distance=&unit=
+ *
+ * Query-string variant — easier for frontends than path params.
+ * Same behavior as `getToursWithin`.
+ */
+const getToursNear = catchAsync(async (req, res, next) => {
+  const {
+    lat,
+    lng,
+    distance = 50,
+    unit = "km",
+    page = 1,
+    limit = 50,
+  } = req.query;
+
+  if (!lat || !lng) {
+    return next(
+      new AppError("Please provide both 'lat' and 'lng' query parameters", 400),
+    );
+  }
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return next(new AppError("Latitude and longitude must be numbers", 400));
+  }
+
+  if (latNum < -90 || latNum > 90) {
+    return next(new AppError("Latitude must be between -90 and 90", 400));
+  }
+
+  if (lngNum < -180 || lngNum > 180) {
+    return next(new AppError("Longitude must be between -180 and 180", 400));
+  }
+
+  const radiusMeters = geoService.convertToMeters(distance, unit);
+
+  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+
+  const filter = {};
+
+  if (req.query.difficulty) filter.difficulty = req.query.difficulty;
+  if (req.query.category) filter.category = req.query.category;
+
+  if (req.query.minPrice || req.query.maxPrice) {
+    filter.price = {};
+    if (req.query.minPrice) filter.price.$gte = Number(req.query.minPrice);
+    if (req.query.maxPrice) filter.price.$lte = Number(req.query.maxPrice);
+  }
+
+  const { tours, total, center, radius } =
+    await geoService.findToursWithinRadius({
+      lng: lngNum,
+      lat: latNum,
+      radiusMeters,
+      unit,
+      limit: parsedLimit,
+      page: parsedPage,
+      filter,
+    });
+
+  res.status(200).json({
+    status: "success",
+    results: tours.length,
+    total,
+    page: parsedPage,
+    pages: Math.ceil(total / parsedLimit),
+    data: {
+      center,
+      radius,
+      tours,
+    },
+  });
+});
+
+/**
+ * GET /tours/:id/distance-to/:latlng/unit/:unit
+ *
+ * Distance from a single tour to a given point.
+ * Accepts tour _id OR slug in the `:id` position.
+ */
+const getDistanceFromTour = catchAsync(async (req, res, next) => {
+  const { id, latlng, unit } = req.params;
+
+  if (!latlng || !unit) {
+    return next(
+      new AppError("Please provide center coordinates (lat,lng) and unit", 400),
+    );
+  }
+
+  const { lng, lat } = geoService.parseLatLng(latlng);
+
+  const result = await geoService.distanceFromTourToPoint(id, lng, lat, unit);
+
+  res.status(200).json({
+    status: "success",
+    data: result,
+  });
+});
+
 export {
   deleteTour,
   softDeleteTour,
@@ -1721,4 +1955,7 @@ export {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
+  getToursWithin,
+  getToursNear,
+  getDistanceFromTour,
 };
