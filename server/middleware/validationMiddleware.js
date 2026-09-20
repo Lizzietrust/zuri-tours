@@ -3,6 +3,10 @@ import mongoose from "mongoose";
 import { AppError } from "../utils/appError.js";
 import { sendValidationErrorResponse } from "../utils/responseHelper.js";
 
+/* ============================================================
+   VALIDATION RESULT HELPERS
+   ============================================================ */
+
 /**
  * Handle validation results from express-validator
  * @param {Object} req - Express request object
@@ -39,6 +43,10 @@ export const validateResultWithResponse = (req, res, next) => {
   }
   next();
 };
+
+/* ============================================================
+   OBJECT ID VALIDATION
+   ============================================================ */
 
 export const checkValidId = (req, res, next) => {
   const { id, tourId, userId, guideId, reviewId } = req.params;
@@ -118,6 +126,81 @@ export const validateReviewId = [
   validateResult,
 ];
 
+/* ============================================================
+   GEOSPATIAL PARAMS — latlng / distance / unit
+   ============================================================
+   Used by:
+     - GET /tours/within/:distance/center/:latlng/unit/:unit
+     - GET /tours/:id/distance-to/:latlng/unit/:unit
+
+   NOTE: This middleware is intentionally synchronous. It performs
+   no I/O, so it does NOT need to be wrapped in `catchAsync`.
+   Express catches synchronous throws and forwards them to the
+   global error handler automatically.
+   ============================================================ */
+
+const SUPPORTED_GEO_UNITS = ["m", "km", "mi", "nm"];
+
+export const validateGeospatialParams = (req, res, next) => {
+  const { latlng, distance, unit } = req.params;
+
+  /* ---------- latlng ---------- */
+  if (!latlng) {
+    return next(new AppError("Coordinates (lat,lng) are required", 400));
+  }
+
+  const parts = String(latlng)
+    .split(",")
+    .map((p) => Number(p.trim()));
+
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+    return next(new AppError("Coordinates must be in 'lat,lng' format", 400));
+  }
+
+  const [lat, lng] = parts;
+
+  if (lat < -90 || lat > 90) {
+    return next(new AppError("Latitude must be between -90 and 90", 400));
+  }
+
+  if (lng < -180 || lng > 180) {
+    return next(new AppError("Longitude must be between -180 and 180", 400));
+  }
+
+  /* ---------- distance (optional) ---------- */
+  if (distance !== undefined) {
+    const d = Number(distance);
+
+    if (!Number.isFinite(d) || d <= 0) {
+      return next(new AppError("Distance must be a positive number", 400));
+    }
+  }
+
+  /* ---------- unit (optional) ---------- */
+  if (unit !== undefined && !SUPPORTED_GEO_UNITS.includes(unit)) {
+    return next(
+      new AppError(
+        `Invalid unit. Use one of: ${SUPPORTED_GEO_UNITS.join(", ")}`,
+        400,
+      ),
+    );
+  }
+
+  /* Stash parsed values for downstream handlers. */
+  req.geo = {
+    lat,
+    lng,
+    distance: distance !== undefined ? Number(distance) : undefined,
+    unit,
+  };
+
+  return next();
+};
+
+/* ============================================================
+   REVIEW VALIDATION
+   ============================================================ */
+
 export const validateReview = [
   body("review")
     .notEmpty()
@@ -188,6 +271,10 @@ export const validateReviewWithResponse = [
 
   validateResultWithResponse,
 ];
+
+/* ============================================================
+   TOUR BODY VALIDATION
+   ============================================================ */
 
 export const checkTourBody = (req, res, next) => {
   const { name, price, duration, difficulty } = req.body;
@@ -279,6 +366,10 @@ export const validateTourBody = [
 
   validateResult,
 ];
+
+/* ============================================================
+   USER VALIDATION
+   ============================================================ */
 
 export const validateUser = (req, res, next) => {
   const { name, email, password, passwordConfirm } = req.body;
@@ -404,6 +495,10 @@ export const checkUserBody = (req, res, next) => {
   next();
 };
 
+/* ============================================================
+   AUTH VALIDATION
+   ============================================================ */
+
 export const validateAuth = (req, res, next) => {
   const { email, password } = req.body;
 
@@ -445,6 +540,10 @@ export const validateAuthWithExpress = [
 
   validateResult,
 ];
+
+/* ============================================================
+   QUERY VALIDATION — PAGINATION / SEARCH
+   ============================================================ */
 
 export const validatePagination = [
   query("page")
@@ -522,6 +621,10 @@ export const validateSearch = [
 
   validateResult,
 ];
+
+/* ============================================================
+   UPDATE VALIDATION — PARTIAL
+   ============================================================ */
 
 export const validateTourUpdate = [
   body("name")
@@ -602,6 +705,10 @@ export const validateUserUpdate = [
   validateResult,
 ];
 
+/* ============================================================
+   DEFAULT EXPORT
+   ============================================================ */
+
 export default {
   validateResult,
   validateResultWithResponse,
@@ -611,6 +718,9 @@ export default {
   validateTourId,
   validateUserId,
   validateReviewId,
+
+  // geospatial
+  validateGeospatialParams,
 
   validateReview,
   validateReviewWithResponse,
