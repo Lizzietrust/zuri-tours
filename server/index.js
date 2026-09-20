@@ -9,18 +9,17 @@ import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
 import hpp from "hpp";
 
-import tourRouter from "../routes/tourRoutes.js";
-import reviewRouter from "../routes/reviewRoutes.js";
-import userRouter from "../routes/userRoutes.js";
-import authRouter from "../routes/authRoutes.js";
+import tourRouter from "./routes/tourRoutes.js";
+import reviewRouter from "./routes/reviewRoutes.js";
+import userRouter from "./routes/userRoutes.js";
+import authRouter from "./routes/authRoutes.js";
 
 import {
   generalLimiter,
   apiLimiter,
-} from "../middleware/rateLimitMiddleware.js";
-import { securityHeaders } from "../middleware/securityHeaders.js";
-// import { errorHandler, notFound } from "../middleware/errorHandler.js";
-import { AppError } from "../utils/appError.js";
+} from "./middleware/rateLimitMiddleware.js";
+import { securityHeaders } from "./middleware/securityHeaders.js";
+import { AppError } from "./utils/appError.js";
 
 dotenv.config();
 
@@ -39,10 +38,7 @@ console.log(
 );
 
 mongoose
-  .connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+  .connect(MONGODB_URI)
   .then(() => {
     console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
     console.log(`   Host: ${mongoose.connection.host}`);
@@ -55,6 +51,8 @@ mongoose
   });
 
 const app = express();
+
+/* ---------- Security ---------- */
 
 app.use(
   helmet({
@@ -81,6 +79,8 @@ app.use(
 );
 
 app.use(securityHeaders);
+
+/* ---------- CORS ---------- */
 
 const corsOptions = {
   origin: process.env.CLIENT_URL
@@ -109,10 +109,14 @@ if (NODE_ENV === "production") {
 
 app.use(cors(corsOptions));
 
+/* ---------- Body parsing ---------- */
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use(compression());
+
+/* ---------- Logging ---------- */
 
 if (NODE_ENV === "development") {
   app.use(morgan("dev"));
@@ -120,8 +124,9 @@ if (NODE_ENV === "development") {
   app.use(morgan("combined"));
 }
 
-app.use(xss());
+/* ---------- Sanitization ---------- */
 
+app.use(xss());
 app.use(mongoSanitize());
 
 app.use(
@@ -140,7 +145,11 @@ app.use(
   }),
 );
 
+/* ---------- Rate limiting ---------- */
+
 app.use("/api", apiLimiter || generalLimiter);
+
+/* ---------- Request logger ---------- */
 
 if (NODE_ENV !== "production") {
   app.use((req, res, next) => {
@@ -149,13 +158,14 @@ if (NODE_ENV !== "production") {
   });
 }
 
+/* ---------- Routes ---------- */
+
 app.use(`${API_VERSION}/auth`, authRouter);
-
 app.use(`${API_VERSION}/tours`, tourRouter);
-
 app.use(`${API_VERSION}/reviews`, reviewRouter);
-
 app.use(`${API_VERSION}/users`, userRouter);
+
+/* ---------- Health check ---------- */
 
 app.get("/health", (req, res) => {
   const dbStatus = mongoose.connection.readyState;
@@ -193,6 +203,8 @@ app.get("/health", (req, res) => {
   });
 });
 
+/* ---------- Root ---------- */
+
 app.get("/", (req, res) => {
   res.json({
     message: `Server is running in ${NODE_ENV} mode! 🚀`,
@@ -227,11 +239,20 @@ app.get("/", (req, res) => {
   });
 });
 
-app.all("*", (req, res, next) => {
+/* ---------- 404 catch-all ----------
+   Express 5 requires named wildcards. `/{*splat}` matches everything
+   including the root path. The old `"*"` throws a PathError at boot.
+ */
+app.all("/{*splat}", (req, res, next) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server`, 404));
 });
 
-app.use((err, req, res) => {
+/* ---------- Global error handler ----------
+   MUST have exactly 4 arguments (err, req, res, next). Without `next`,
+   Express treats this as a regular route handler and never invokes it
+   for errors.
+ */
+app.use((err, req, res, _next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";
 
@@ -277,11 +298,13 @@ app.use((err, req, res) => {
     error = new AppError("Your token has expired. Please log in again.", 401);
   }
 
-  res.status(error.statusCode || 500).json({
+  return res.status(error.statusCode || 500).json({
     status: error.status || "error",
     message: error.message || "Something went wrong",
   });
 });
+
+/* ---------- Server ---------- */
 
 const server = app.listen(PORT, () => {
   console.log(`\n🚀 Server running on http://localhost:${PORT}`);
@@ -301,6 +324,8 @@ const server = app.listen(PORT, () => {
   console.log(`   - Reviews: ${API_VERSION}/reviews`);
   console.log(`   - Health:  /health`);
 });
+
+/* ---------- Graceful shutdown ---------- */
 
 const shutdown = () => {
   console.log("\n🛑 Shutting down server...");
