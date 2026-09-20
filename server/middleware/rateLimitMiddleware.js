@@ -1,13 +1,9 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
-/**
- * Create a custom rate limiter with consistent response format
- * @param {number} windowMs - Time window in milliseconds
- * @param {number} max - Maximum number of requests
- * @param {string} message - Custom error message
- * @param {Object} options - Additional rate limiter options
- * @returns {Function} Express rate limiter middleware
- */
+/* ============================================================
+   FACTORY FUNCTIONS
+   ============================================================ */
+
 export const createRateLimiter = (
   windowMs,
   max,
@@ -27,15 +23,6 @@ export const createRateLimiter = (
   });
 };
 
-/**
- * Create a rate limiter with skip successful requests option
- * Useful for login attempts where only failed attempts should count
- * @param {number} windowMs - Time window in milliseconds
- * @param {number} max - Maximum number of failed attempts
- * @param {string} message - Custom error message
- * @param {Object} options - Additional rate limiter options
- * @returns {Function} Express rate limiter middleware
- */
 export const createFailedAttemptLimiter = (
   windowMs,
   max,
@@ -56,15 +43,6 @@ export const createFailedAttemptLimiter = (
   });
 };
 
-/**
- * Create a rate limiter with custom key generator
- * Useful for rate limiting by user ID instead of IP
- * @param {number} windowMs - Time window in milliseconds
- * @param {number} max - Maximum number of requests
- * @param {string} message - Custom error message
- * @param {Object} options - Additional rate limiter options
- * @returns {Function} Express rate limiter middleware
- */
 export const createUserRateLimiter = (
   windowMs,
   max,
@@ -81,20 +59,15 @@ export const createUserRateLimiter = (
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-      return req.user?.id || req.ip;
+      // Prefer the authenticated user id; fall back to the IP.
+      // ipKeyGenerator normalizes IPv6 addresses so limits can't be
+      // trivially bypassed by rotating equivalent IPv6 strings.
+      return req.user?.id || ipKeyGenerator(req.ip);
     },
     ...options,
   });
 };
 
-/**
- * Create a rate limiter that skips for authenticated users
- * @param {number} windowMs - Time window in milliseconds
- * @param {number} max - Maximum number of requests
- * @param {string} message - Custom error message
- * @param {Object} options - Additional rate limiter options
- * @returns {Function} Express rate limiter middleware
- */
 export const createSkipAuthLimiter = (
   windowMs,
   max,
@@ -117,14 +90,6 @@ export const createSkipAuthLimiter = (
   });
 };
 
-/**
- * Create a rate limiter that only applies to authenticated users
- * @param {number} windowMs - Time window in milliseconds
- * @param {number} max - Maximum number of requests
- * @param {string} message - Custom error message
- * @param {Object} options - Additional rate limiter options
- * @returns {Function} Express rate limiter middleware
- */
 export const createAuthOnlyLimiter = (
   windowMs,
   max,
@@ -141,7 +106,7 @@ export const createAuthOnlyLimiter = (
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-      return req.user?.id || req.ip;
+      return req.user?.id || ipKeyGenerator(req.ip);
     },
     skip: (req) => {
       return !req.user;
@@ -153,6 +118,10 @@ export const createAuthOnlyLimiter = (
 export const createPerUserLimiter = (windowMs, max, message) => {
   return createUserRateLimiter(windowMs, max, message);
 };
+
+/* ============================================================
+   PRE-CONFIGURED LIMITERS
+   ============================================================ */
 
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -352,7 +321,7 @@ export const bulkOperationLimiter = rateLimit({
 });
 
 export const strictLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000,
   max: 5,
   message: {
     status: "error",
@@ -363,27 +332,25 @@ export const strictLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ==================== RATE LIMITER WITH SKIP OPTIONS ====================
+/* ============================================================
+   COMPOSED LIMITERS
+   ============================================================ */
 
-/**
- * Rate limiter that skips for authenticated users
- */
 export const skipAuthLimiter = createSkipAuthLimiter(
-  60 * 1000, // 1 minute
+  60 * 1000,
   20,
   "Too many requests. Please login to continue.",
 );
 
-/**
- * Rate limiter that only applies to authenticated users
- */
 export const authOnlyLimiter = createAuthOnlyLimiter(
-  60 * 1000, // 1 minute
+  60 * 1000,
   10,
   "Too many requests for authenticated users.",
 );
 
-// ==================== EXPORT ALL ====================
+/* ============================================================
+   DEFAULT EXPORT
+   ============================================================ */
 
 export default {
   // Core factories
