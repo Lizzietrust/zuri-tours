@@ -4,6 +4,7 @@ import Review from "../models/Review.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
 import TourQueryService from "../services/tourQueryService.js";
+import geoService from "../services/geoService.js";
 import {
   deleteOne,
   deleteMany,
@@ -15,12 +16,6 @@ import {
   getAll,
   getOne,
 } from "../utils/handlerFactory.js";
-
-/* ============================================================
-   GEOSPATIAL HANDLERS
-   ============================================================ */
-
-import geoService from "../services/geoService.js";
 
 /* ============================================================
    POPULATION HELPERS
@@ -140,11 +135,6 @@ const populateGuideFields = (query, populateOptions = {}) => {
    "HAS USER REVIEWED" ENRICHMENT
    ============================================================ */
 
-/**
- * Given an array of tour documents (lean or hydrated) and a user id,
- * return a new array where each tour has a `hasUserReviewed` boolean
- * and (optionally) the user's review for that tour inlined.
- */
 async function attachUserReviewFlags(
   tours,
   userId,
@@ -623,7 +613,7 @@ const getTour = catchAsync((req, res, next) => {
 });
 
 /* ============================================================
-   OTHER HANDLERS (unchanged)
+   CREATE / UPDATE
    ============================================================ */
 
 const createTour = createOne(Tour, {
@@ -771,9 +761,7 @@ const updateTour = updateOne(Tour, {
 });
 
 /* ============================================================
-   HANDLERS THAT REMAIN UNCHANGED
-   (getTourWithReviews, price/difficulty/rating/duration,
-    searchTours, getTourStats, getMonthlyPlan, guide assignment)
+   TOUR + REVIEWS
    ============================================================ */
 
 const getTourWithReviews = catchAsync(async (req, res) => {
@@ -878,7 +866,9 @@ const getTourWithReviews = catchAsync(async (req, res) => {
   });
 });
 
-/* (all other handlers from your file, unchanged) */
+/* ============================================================
+   DISCOVERY / SPECIAL QUERIES
+   ============================================================ */
 
 const getToursByPriceRange = catchAsync(async (req, res) => {
   const minPrice = parseInt(req.query.min, 10) || 0;
@@ -1126,6 +1116,10 @@ const searchTours = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   AGGREGATE STATS
+   ============================================================ */
+
 const getTourStats = catchAsync(async (req, res) => {
   const [stats, overallStats] = await Promise.all([
     Tour.aggregate([
@@ -1226,6 +1220,10 @@ const getMonthlyPlan = catchAsync(async (req, res) => {
     data: plan,
   });
 });
+
+/* ============================================================
+   GUIDE MANAGEMENT
+   ============================================================ */
 
 const assignGuide = catchAsync(async (req, res) => {
   const { id: tourId } = req.params;
@@ -1701,18 +1699,14 @@ const addGuideRating = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   GEOSPATIAL HANDLERS — POINT QUERIES (existing)
+   ============================================================ */
+
 /**
  * GET /tours/within/:distance/center/:latlng/unit/:unit
  *
- * Classic radius query:
- *   /tours/within/50/center/40.7128,-74.0060/unit/km
- *
- * Optional query params:
- *   - difficulty   (filter)
- *   - minPrice, maxPrice (filter)
- *   - page, limit
- *   - populateReviews=true/false
- *   - populateGuides=true/false
+ * Classic radius query (uses `$near` + Node.js distance enrichment).
  */
 const getToursWithin = catchAsync(async (req, res, next) => {
   const { distance, latlng, unit } = req.params;
@@ -1829,8 +1823,7 @@ const getToursWithin = catchAsync(async (req, res, next) => {
 /**
  * GET /tours/near?lat=&lng=&distance=&unit=
  *
- * Query-string variant — easier for frontends than path params.
- * Same behavior as `getToursWithin`.
+ * Query-string variant.
  */
 const getToursNear = catchAsync(async (req, res, next) => {
   const {
@@ -1906,9 +1899,6 @@ const getToursNear = catchAsync(async (req, res, next) => {
 
 /**
  * GET /tours/:id/distance-to/:latlng/unit/:unit
- *
- * Distance from a single tour to a given point.
- * Accepts tour _id OR slug in the `:id` position.
  */
 const getDistanceFromTour = catchAsync(async (req, res, next) => {
   const { id, latlng, unit } = req.params;
@@ -1928,6 +1918,254 @@ const getDistanceFromTour = catchAsync(async (req, res, next) => {
     data: result,
   });
 });
+
+/* ============================================================
+   GEOSPATIAL AGGREGATION HANDLERS — $geoNear PIPELINES
+   ============================================================ */
+
+/**
+ * GET /tours/near-aggregate
+ * Query: lat, lng, distance=50, unit=km, page, limit,
+ *        sortBy=distance|price|ratingsAverage, difficulty, category,
+ *        minPrice, maxPrice
+ */
+const getToursNearAggregate = catchAsync(async (req, res, next) => {
+  const {
+    lat,
+    lng,
+    distance = 50,
+    unit = "km",
+    page = 1,
+    limit = 20,
+    sortBy = "distance",
+  } = req.query;
+
+  if (!lat || !lng) {
+    return next(
+      new AppError("Please provide both 'lat' and 'lng' query parameters", 400),
+    );
+  }
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return next(new AppError("Latitude and longitude must be numbers", 400));
+  }
+
+  if (latNum < -90 || latNum > 90) {
+    return next(new AppError("Latitude must be between -90 and 90", 400));
+  }
+
+  if (lngNum < -180 || lngNum > 180) {
+    return next(new AppError("Longitude must be between -180 and 180", 400));
+  }
+
+  const allowedSorts = ["distance", "price", "ratingsAverage"];
+
+  if (!allowedSorts.includes(sortBy)) {
+    return next(
+      new AppError(
+        `Invalid sortBy. Use one of: ${allowedSorts.join(", ")}`,
+        400,
+      ),
+    );
+  }
+
+  const radiusMeters = geoService.convertToMeters(distance, unit);
+
+  const filter = {};
+
+  if (req.query.difficulty) filter.difficulty = req.query.difficulty;
+  if (req.query.category) filter.category = req.query.category;
+
+  if (req.query.minPrice || req.query.maxPrice) {
+    filter.price = {};
+    if (req.query.minPrice) filter.price.$gte = Number(req.query.minPrice);
+    if (req.query.maxPrice) filter.price.$lte = Number(req.query.maxPrice);
+  }
+
+  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+
+  const result = await geoService.aggregateToursWithinRadius({
+    lng: lngNum,
+    lat: latNum,
+    radiusMeters,
+    unit,
+    page: parsedPage,
+    limit: parsedLimit,
+    filter,
+    sortBy,
+  });
+
+  res.status(200).json({
+    status: "success",
+    results: result.tours.length,
+    total: result.total,
+    page: result.page,
+    pages: result.pages,
+    data: {
+      center: result.center,
+      radius: result.radius,
+      tours: result.tours,
+    },
+  });
+});
+
+/**
+ * GET /tours/distance-stats
+ * Query: lat, lng, distance=500, unit=km, groupBy=difficulty|category|featured
+ */
+const getDistanceStats = catchAsync(async (req, res, next) => {
+  const { lat, lng, distance = 500, unit = "km", groupBy } = req.query;
+
+  if (!lat || !lng) {
+    return next(
+      new AppError("Please provide both 'lat' and 'lng' query parameters", 400),
+    );
+  }
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return next(new AppError("Latitude and longitude must be numbers", 400));
+  }
+
+  const allowedGroups = ["difficulty", "category", "featured"];
+  const parsedGroupBy =
+    groupBy && allowedGroups.includes(groupBy) ? groupBy : null;
+
+  if (groupBy && !parsedGroupBy) {
+    return next(
+      new AppError(
+        `Invalid groupBy. Use one of: ${allowedGroups.join(", ")}`,
+        400,
+      ),
+    );
+  }
+
+  const radiusMeters = geoService.convertToMeters(distance, unit);
+
+  const result = await geoService.aggregateDistanceStats({
+    lng: lngNum,
+    lat: latNum,
+    radiusMeters,
+    unit,
+    groupBy: parsedGroupBy,
+  });
+
+  res.status(200).json({
+    status: "success",
+    data: result,
+  });
+});
+
+/**
+ * GET /tours/distance-distribution
+ * Query: lat, lng, distance=500, unit=km, buckets=5
+ */
+const getDistanceDistribution = catchAsync(async (req, res, next) => {
+  const { lat, lng, distance = 500, unit = "km", buckets = 5 } = req.query;
+
+  if (!lat || !lng) {
+    return next(
+      new AppError("Please provide both 'lat' and 'lng' query parameters", 400),
+    );
+  }
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return next(new AppError("Latitude and longitude must be numbers", 400));
+  }
+
+  const parsedBuckets = Math.min(20, Math.max(2, parseInt(buckets, 10) || 5));
+
+  const radiusMeters = geoService.convertToMeters(distance, unit);
+
+  const result = await geoService.aggregateDistanceDistribution({
+    lng: lngNum,
+    lat: latNum,
+    radiusMeters,
+    unit,
+    buckets: parsedBuckets,
+  });
+
+  res.status(200).json({
+    status: "success",
+    data: result,
+  });
+});
+
+/**
+ * POST /tours/batch-distance
+ * Body: { tourIds: [...], lat, lng, unit }
+ */
+const getBatchDistances = catchAsync(async (req, res, next) => {
+  const { tourIds, lat, lng, unit = "km" } = req.body;
+
+  if (!Array.isArray(tourIds) || tourIds.length === 0) {
+    return next(new AppError("Please provide an array of tour IDs", 400));
+  }
+
+  if (tourIds.length > 200) {
+    return next(
+      new AppError(
+        "Cannot compute distances for more than 200 tours at once",
+        400,
+      ),
+    );
+  }
+
+  if (lat === undefined || lng === undefined) {
+    return next(
+      new AppError("Please provide 'lat' and 'lng' in the request body", 400),
+    );
+  }
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return next(new AppError("Latitude and longitude must be numbers", 400));
+  }
+
+  if (latNum < -90 || latNum > 90) {
+    return next(new AppError("Latitude must be between -90 and 90", 400));
+  }
+
+  if (lngNum < -180 || lngNum > 180) {
+    return next(new AppError("Longitude must be between -180 and 180", 400));
+  }
+
+  const validUnits = ["m", "km", "mi", "nm"];
+
+  if (!validUnits.includes(unit)) {
+    return next(
+      new AppError(`Invalid unit. Use one of: ${validUnits.join(", ")}`, 400),
+    );
+  }
+
+  const result = await geoService.aggregateDistancesToTours({
+    lng: lngNum,
+    lat: latNum,
+    tourIds,
+    unit,
+  });
+
+  res.status(200).json({
+    status: "success",
+    results: result.count,
+    data: result,
+  });
+});
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 
 export {
   deleteTour,
@@ -1955,7 +2193,13 @@ export {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
+  // geospatial point queries
   getToursWithin,
   getToursNear,
   getDistanceFromTour,
+  // geospatial aggregation
+  getToursNearAggregate,
+  getDistanceStats,
+  getDistanceDistribution,
+  getBatchDistances,
 };
