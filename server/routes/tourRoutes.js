@@ -25,10 +25,15 @@ import {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
-  // ----- geospatial handlers -----
+  // ----- geospatial point handlers -----
   getToursWithin,
   getToursNear,
   getDistanceFromTour,
+  // ----- geospatial aggregation handlers -----
+  getToursNearAggregate,
+  getDistanceStats,
+  getDistanceDistribution,
+  getBatchDistances,
 } from "../controllers/tourController.js";
 import {
   protect,
@@ -73,6 +78,8 @@ router.route("/search").get(searchTours);
    (MUST be declared before /:id to avoid being shadowed)
    ============================================================ */
 
+/* ---------- Point queries ---------- */
+
 /**
  * Radius search with path params.
  *   GET /tours/within/50/center/40.7128,-74.0060/unit/km
@@ -89,6 +96,33 @@ router
  *   GET /tours/near?lat=40.7128&lng=-74.0060&distance=50&unit=km
  */
 router.route("/near").get(getToursNear);
+
+/* ---------- Aggregation queries ---------- */
+
+/**
+ * $geoNear aggregation with DB-side distance + sorting + pagination + count.
+ *   GET /tours/near-aggregate?lat=&lng=&distance=&unit=&page=&limit=&sortBy=
+ */
+router.route("/near-aggregate").get(getToursNearAggregate);
+
+/**
+ * Distance statistics (min/max/avg/count) around a point.
+ *   GET /tours/distance-stats?lat=&lng=&distance=&unit=&groupBy=
+ */
+router.route("/distance-stats").get(getDistanceStats);
+
+/**
+ * Distance histogram — how many tours fall into each distance bucket.
+ *   GET /tours/distance-distribution?lat=&lng=&distance=&unit=&buckets=
+ */
+router.route("/distance-distribution").get(getDistanceDistribution);
+
+/**
+ * Batch distances from one point to a list of tour IDs.
+ *   POST /tours/batch-distance
+ *   Body: { tourIds: [...], lat, lng, unit }
+ */
+router.route("/batch-distance").post(getBatchDistances);
 
 /* ============================================================
    AUTHENTICATED NON-ADMIN ROUTES
