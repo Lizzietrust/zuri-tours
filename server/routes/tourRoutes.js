@@ -25,6 +25,10 @@ import {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
+  // ----- geospatial handlers -----
+  getToursWithin,
+  getToursNear,
+  getDistanceFromTour,
 } from "../controllers/tourController.js";
 import {
   protect,
@@ -36,6 +40,7 @@ import {
 import {
   checkValidId,
   checkTourBody,
+  validateGeospatialParams,
 } from "../middleware/validationMiddleware.js";
 import {
   tourCreationLimiter,
@@ -62,6 +67,28 @@ router.route("/shortest").get(getToursByDuration);
 router.route("/price-range").get(getToursByPriceRange);
 router.route("/difficulty/:level").get(getToursByDifficulty);
 router.route("/search").get(searchTours);
+
+/* ============================================================
+   GEOSPATIAL ROUTES
+   (MUST be declared before /:id to avoid being shadowed)
+   ============================================================ */
+
+/**
+ * Radius search with path params.
+ *   GET /tours/within/50/center/40.7128,-74.0060/unit/km
+ *
+ * Optional query params: difficulty, category, minPrice, maxPrice,
+ * page, limit, populateReviews, populateGuides.
+ */
+router
+  .route("/within/:distance/center/:latlng/unit/:unit")
+  .get(validateGeospatialParams, getToursWithin);
+
+/**
+ * Radius search with query-string params (friendlier for JS clients).
+ *   GET /tours/near?lat=40.7128&lng=-74.0060&distance=50&unit=km
+ */
+router.route("/near").get(getToursNear);
 
 /* ============================================================
    AUTHENTICATED NON-ADMIN ROUTES
@@ -148,6 +175,14 @@ router
    ============================================================ */
 
 router.route("/:id/reviews").get(getTourWithReviews);
+
+/* ============================================================
+   GEOSPATIAL — DISTANCE FROM A SINGLE TOUR
+   ============================================================ */
+
+router
+  .route("/:id/distance-to/:latlng/unit/:unit")
+  .get(validateGeospatialParams, getDistanceFromTour);
 
 /* ============================================================
    GUIDE MANAGEMENT
