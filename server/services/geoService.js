@@ -5,10 +5,6 @@ import { AppError } from "../utils/appError.js";
    UNIT CONVERSION
    ============================================================ */
 
-/**
- * Earth's radius in each supported unit (approximate, good enough
- * for "within X km" queries).
- */
 const EARTH_RADIUS = {
   m: 6371008.8,
   km: 6371.0088,
@@ -17,9 +13,22 @@ const EARTH_RADIUS = {
 };
 
 /**
- * Convert a distance value + unit into meters, which is what
- * MongoDB's `$near`/`$geoWithin` expect.
+ * Meters per unit — single source of truth used everywhere we need
+ * to convert distances inside aggregation pipelines.
  */
+const METERS_PER_UNIT = {
+  m: 1,
+  km: 1000,
+  mi: 1609.34,
+  nm: 1852,
+};
+
+/**
+ * Return the number of meters in one `unit`. Falls back to `1` (m)
+ * for unrecognized units so aggregations never blow up.
+ */
+const metersPerUnit = (unit) => METERS_PER_UNIT[unit] ?? 1;
+
 export const convertToMeters = (distance, unit) => {
   const distanceNum = Number(distance);
 
@@ -27,37 +36,14 @@ export const convertToMeters = (distance, unit) => {
     throw new AppError("Distance must be a positive number", 400);
   }
 
-  switch (unit) {
-    case "km":
-      return distanceNum * 1000;
-    case "mi":
-      return distanceNum * 1609.34;
-    case "nm":
-      return distanceNum * 1852;
-    case "m":
-      return distanceNum;
-    default:
-      throw new AppError("Invalid unit. Use one of: m, km, mi, nm", 400);
+  if (!METERS_PER_UNIT[unit]) {
+    throw new AppError("Invalid unit. Use one of: m, km, mi, nm", 400);
   }
+
+  return distanceNum * METERS_PER_UNIT[unit];
 };
 
-/**
- * Convert meters back to the caller's preferred unit. Used for
- * returning `distance` alongside each result.
- */
-export const convertFromMeters = (meters, unit) => {
-  switch (unit) {
-    case "km":
-      return meters / 1000;
-    case "mi":
-      return meters / 1609.34;
-    case "nm":
-      return meters / 1852;
-    case "m":
-    default:
-      return meters;
-  }
-};
+export const convertFromMeters = (meters, unit) => meters / metersPerUnit(unit);
 
 /* ============================================================
    COORDINATE PARSING / VALIDATION
@@ -94,12 +80,6 @@ export const parseLatLng = (latlng) => {
    HAVERSINE DISTANCE (in meters)
    ============================================================ */
 
-/**
- * Compute the great-circle distance between two points, in meters.
- * Used for enriching each result with `distanceInKm` etc.
- *
- * Accepts `[lng, lat]` arrays (Mongo order).
- */
 export const haversineMeters = ([lng1, lat1], [lng2, lat2]) => {
   const R = EARTH_RADIUS.m;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -120,26 +100,9 @@ export const haversineMeters = ([lng1, lat1], [lng2, lat2]) => {
 };
 
 /* ============================================================
-   TOUR GEO QUERIES
+   TOUR GEO QUERIES (existing — kept for backward compatibility)
    ============================================================ */
 
-/**
- * Find all active, non-secret tours within `radiusMeters` of
- * `[lng, lat]`, sorted by distance ascending, with `distance`
- * fields added to each result.
- *
- * Uses the `2dsphere` index on `location.coordinates`.
- *
- * @param {Object} params
- * @param {number} params.lng
- * @param {number} params.lat
- * @param {number} params.radiusMeters
- * @param {string} params.unit        - one of m, km, mi, nm
- * @param {number} [params.limit=100] - cap on results
- * @param {number} [params.page=1]
- * @param {Object} [params.filter={}] - extra filter (e.g. difficulty)
- * @returns {Promise<{ tours: Object[], total: number, center: [number, number] }>}
- */
 export const findToursWithinRadius = async ({
   lng,
   lat,
@@ -155,10 +118,7 @@ export const findToursWithinRadius = async ({
     ...filter,
     location: {
       $near: {
-        $geometry: {
-          type: "Point",
-          coordinates: [lng, lat],
-        },
+        $geometry: { type: "Point", coordinates: [lng, lat] },
         $maxDistance: radiusMeters,
       },
     },
@@ -202,10 +162,6 @@ export const findToursWithinRadius = async ({
   };
 };
 
-/**
- * Compute the distance from a single tour (looked up by id or slug)
- * to a given point. Returns null if the tour has no coordinates.
- */
 export const distanceFromTourToPoint = async (tourIdOrSlug, lng, lat, unit) => {
   const isMongoId = /^[0-9a-fA-F]{24}$/.test(tourIdOrSlug);
 
@@ -237,6 +193,384 @@ export const distanceFromTourToPoint = async (tourIdOrSlug, lng, lat, unit) => {
   };
 };
 
+/* ==================================================================
+   GEOSPATIAL AGGREGATION — $geoNear PIPELINE BUILDERS
+   ================================================================== */
+
+/**
+ * Build the standard `$geoNear` stage.
+ */
+const buildGeoNearStage = ({
+  lng,
+  lat,
+  radiusMeters,
+  distanceField = "distanceMeters",
+  query = {},
+  spherical = true,
+  minDistance = 0,
+}) => ({
+  $geoNear: {
+    near: { type: "Point", coordinates: [lng, lat] },
+    distanceField,
+    maxDistance: radiusMeters,
+    minDistance,
+    spherical,
+    key: "location.coordinates",
+    query,
+  },
+});
+
+/**
+ * Build the `$sort` stage for a geo aggregation based on `sortBy`.
+ * Distance is always the tiebreaker so results are stable.
+ */
+const buildGeoSortStage = (sortBy = "distance") => {
+  switch (sortBy) {
+    case "price":
+      return { $sort: { price: 1, distanceMeters: 1 } };
+    case "ratingsAverage":
+      return { $sort: { ratingsAverage: -1, distanceMeters: 1 } };
+    case "distance":
+    default:
+      return { $sort: { distanceMeters: 1 } };
+  }
+};
+
+export const aggregateToursWithinRadius = async ({
+  lng,
+  lat,
+  radiusMeters,
+  unit = "km",
+  page = 1,
+  limit = 20,
+  filter = {},
+  sortBy = "distance",
+}) => {
+  const skip = (page - 1) * limit;
+  const mpu = metersPerUnit(unit);
+
+  const { location: _dropLocation, ...safeFilter } = filter;
+
+  const pipeline = [
+    buildGeoNearStage({
+      lng,
+      lat,
+      radiusMeters,
+      distanceField: "distanceMeters",
+      query: {
+        isActive: true,
+        isSecret: false,
+        ...safeFilter,
+      },
+    }),
+
+    {
+      $addFields: {
+        distance: {
+          $round: [{ $divide: ["$distanceMeters", mpu] }, 2],
+        },
+        distanceUnit: unit,
+        distanceInMeters: { $round: ["$distanceMeters", 0] },
+      },
+    },
+
+    buildGeoSortStage(sortBy),
+
+    {
+      $facet: {
+        tours: [
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $project: {
+              name: 1,
+              slug: 1,
+              summary: 1,
+              price: 1,
+              priceDiscount: 1,
+              duration: 1,
+              difficulty: 1,
+              maxGroupSize: 1,
+              ratingsAverage: 1,
+              ratingsQuantity: 1,
+              imageCover: 1,
+              images: 1,
+              startDates: 1,
+              category: 1,
+              location: 1,
+              distance: 1,
+              distanceUnit: 1,
+              distanceInMeters: 1,
+            },
+          },
+        ],
+        total: [{ $count: "count" }],
+      },
+    },
+  ];
+
+  const [result] = await Tour.aggregate(pipeline);
+
+  const total = result?.total?.[0]?.count || 0;
+
+  return {
+    tours: result?.tours || [],
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    limit,
+    center: [lng, lat],
+    radius: { value: convertFromMeters(radiusMeters, unit), unit },
+  };
+};
+
+/**
+ * Aggregate distance STATISTICS for tours around a point.
+ * Returns min / max / avg distance + count, optionally grouped by
+ * difficulty, category, or featured flag.
+ */
+export const aggregateDistanceStats = async ({
+  lng,
+  lat,
+  radiusMeters = 500000,
+  unit = "km",
+  groupBy = null,
+}) => {
+  const mpu = metersPerUnit(unit);
+
+  const groupStage = groupBy
+    ? {
+        $group: {
+          _id: `$${groupBy}`,
+          count: { $sum: 1 },
+          minDistance: { $min: "$distance" },
+          maxDistance: { $max: "$distance" },
+          avgDistance: { $avg: "$distance" },
+          minPrice: { $min: "$price" },
+          avgPrice: { $avg: "$price" },
+          avgRating: { $avg: "$ratingsAverage" },
+        },
+      }
+    : {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          minDistance: { $min: "$distance" },
+          maxDistance: { $max: "$distance" },
+          avgDistance: { $avg: "$distance" },
+          minPrice: { $min: "$price" },
+          avgPrice: { $avg: "$price" },
+          avgRating: { $avg: "$ratingsAverage" },
+        },
+      };
+
+  const pipeline = [
+    buildGeoNearStage({
+      lng,
+      lat,
+      radiusMeters,
+      distanceField: "distanceMeters",
+      query: { isActive: true, isSecret: false },
+    }),
+
+    {
+      $addFields: {
+        distance: { $divide: ["$distanceMeters", mpu] },
+      },
+    },
+
+    groupStage,
+
+    {
+      $project: {
+        _id: 0,
+        ...(groupBy && { [groupBy]: "$_id" }),
+        count: 1,
+        minDistance: { $round: ["$minDistance", 2] },
+        maxDistance: { $round: ["$maxDistance", 2] },
+        avgDistance: { $round: ["$avgDistance", 2] },
+        minPrice: { $round: ["$minPrice", 2] },
+        avgPrice: { $round: ["$avgPrice", 2] },
+        avgRating: { $round: ["$avgRating", 2] },
+        distanceUnit: { $literal: unit },
+      },
+    },
+
+    { $sort: groupBy ? { avgDistance: 1 } : { count: -1 } },
+  ];
+
+  const results = await Tour.aggregate(pipeline);
+
+  if (!groupBy) {
+    return {
+      center: [lng, lat],
+      radius: { value: convertFromMeters(radiusMeters, unit), unit },
+      stats: results[0] || {
+        count: 0,
+        minDistance: null,
+        maxDistance: null,
+        avgDistance: null,
+        minPrice: null,
+        avgPrice: null,
+        avgRating: null,
+      },
+    };
+  }
+
+  return {
+    center: [lng, lat],
+    radius: { value: convertFromMeters(radiusMeters, unit), unit },
+    groupedBy: groupBy,
+    groups: results,
+  };
+};
+
+export const aggregateDistanceDistribution = async ({
+  lng,
+  lat,
+  radiusMeters = 500000,
+  unit = "km",
+  buckets = 5,
+}) => {
+  const mpu = metersPerUnit(unit);
+
+  const radiusInUnit = convertFromMeters(radiusMeters, unit);
+  const step = radiusInUnit / buckets;
+
+  const boundaries = Array.from(
+    { length: buckets + 1 },
+    (_, i) => Math.round(step * i * 100) / 100,
+  );
+
+  const pipeline = [
+    buildGeoNearStage({
+      lng,
+      lat,
+      radiusMeters,
+      distanceField: "distanceMeters",
+      query: { isActive: true, isSecret: false },
+    }),
+
+    {
+      $addFields: {
+        distance: { $divide: ["$distanceMeters", mpu] },
+      },
+    },
+
+    {
+      $bucket: {
+        groupBy: "$distance",
+        boundaries,
+        default: `over_${radiusInUnit}`,
+        output: {
+          count: { $sum: 1 },
+          avgPrice: { $avg: "$price" },
+          avgRating: { $avg: "$ratingsAverage" },
+          sampleTourNames: { $push: "$name" },
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        rangeStart: "$_id",
+        count: 1,
+        avgPrice: { $round: ["$avgPrice", 2] },
+        avgRating: { $round: ["$avgRating", 2] },
+        sampleTourNames: { $slice: ["$sampleTourNames", 3] },
+      },
+    },
+
+    { $sort: { rangeStart: 1 } },
+  ];
+
+  const distribution = await Tour.aggregate(pipeline);
+
+  const totalTours = distribution.reduce((sum, b) => sum + b.count, 0);
+
+  return {
+    center: [lng, lat],
+    radius: { value: radiusInUnit, unit },
+    buckets,
+    bucketWidth: Math.round(step * 100) / 100,
+    totalTours,
+    distribution,
+  };
+};
+
+export const aggregateDistancesToTours = async ({
+  lng,
+  lat,
+  tourIds,
+  unit = "km",
+  radiusMeters = 20000000,
+}) => {
+  if (!Array.isArray(tourIds) || tourIds.length === 0) {
+    return { center: [lng, lat], unit, tours: [] };
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const objectIds = tourIds
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  if (objectIds.length === 0) {
+    return { center: [lng, lat], unit, tours: [] };
+  }
+
+  const mpu = metersPerUnit(unit);
+
+  const pipeline = [
+    buildGeoNearStage({
+      lng,
+      lat,
+      radiusMeters,
+      distanceField: "distanceMeters",
+      query: {
+        isActive: true,
+        isSecret: false,
+        _id: { $in: objectIds },
+      },
+    }),
+
+    {
+      $addFields: {
+        distance: {
+          $round: [{ $divide: ["$distanceMeters", mpu] }, 2],
+        },
+        distanceUnit: unit,
+        distanceInMeters: { $round: ["$distanceMeters", 0] },
+      },
+    },
+
+    {
+      $project: {
+        name: 1,
+        slug: 1,
+        price: 1,
+        ratingsAverage: 1,
+        imageCover: 1,
+        location: 1,
+        distance: 1,
+        distanceUnit: 1,
+        distanceInMeters: 1,
+      },
+    },
+
+    { $sort: { distanceMeters: 1 } },
+  ];
+
+  const tours = await Tour.aggregate(pipeline);
+
+  return {
+    center: [lng, lat],
+    unit,
+    count: tours.length,
+    tours,
+  };
+};
+
 export default {
   convertToMeters,
   convertFromMeters,
@@ -244,4 +578,9 @@ export default {
   haversineMeters,
   findToursWithinRadius,
   distanceFromTourToPoint,
+  // aggregation helpers
+  aggregateToursWithinRadius,
+  aggregateDistanceStats,
+  aggregateDistanceDistribution,
+  aggregateDistancesToTours,
 };
