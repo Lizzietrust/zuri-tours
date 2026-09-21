@@ -5,8 +5,6 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
-import mongoSanitize from "express-mongo-sanitize";
-import xss from "xss-clean";
 import hpp from "hpp";
 
 import tourRouter from "./routes/tourRoutes.js";
@@ -19,26 +17,29 @@ import {
   apiLimiter,
 } from "./middleware/rateLimitMiddleware.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
+import { sanitizeData } from "./middleware/sanitizeMiddleware.js";
 import { AppError } from "./utils/appError.js";
 
 dotenv.config();
 
 const PORT = process.env.PORT || 3000;
-const MONGODB_URI =
-  process.env.MONGODB_URI || "mongodb://localhost:27017/tourDB";
+
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://localhost:27017/zuri-tours";
+
 const NODE_ENV = process.env.NODE_ENV || "development";
 const API_VERSION = "/api/v1";
 
 console.log("📋 Environment Configuration:");
 console.log(`   NODE_ENV: ${NODE_ENV}`);
 console.log(`   PORT: ${PORT}`);
-console.log(`   MONGO_URI: ${MONGODB_URI ? "✅ Set" : "❌ Not Set"}`);
+console.log(`   MONGO_URI: ${MONGO_URI ? "✅ Set" : "❌ Not Set"}`);
 console.log(
   `   CLIENT_URL: ${process.env.CLIENT_URL ? "✅ Set" : "❌ Not Set"}`,
 );
 
 mongoose
-  .connect(MONGODB_URI)
+  .connect(MONGO_URI)
   .then(() => {
     console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
     console.log(`   Host: ${mongoose.connection.host}`);
@@ -126,8 +127,7 @@ if (NODE_ENV === "development") {
 
 /* ---------- Sanitization ---------- */
 
-app.use(xss());
-app.use(mongoSanitize());
+app.use(sanitizeData);
 
 app.use(
   hpp({
@@ -185,8 +185,8 @@ app.get("/health", (req, res) => {
       cors: process.env.CLIENT_URL ? "configured" : "all origins",
       rateLimiting: true,
       sanitization: {
-        xss: true,
-        mongoSanitize: true,
+        noSqlInjectionProtection: true,
+        xssProtection: true,
       },
       parameterPollutionProtection: true,
     },
@@ -239,19 +239,14 @@ app.get("/", (req, res) => {
   });
 });
 
-/* ---------- 404 catch-all ----------
-   Express 5 requires named wildcards. `/{*splat}` matches everything
-   including the root path. The old `"*"` throws a PathError at boot.
- */
+/* ---------- 404 catch-all ---------- */
+
 app.all("/{*splat}", (req, res, next) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server`, 404));
 });
 
-/* ---------- Global error handler ----------
-   MUST have exactly 4 arguments (err, req, res, next). Without `next`,
-   Express treats this as a regular route handler and never invokes it
-   for errors.
- */
+/* ---------- Global error handler ---------- */
+
 app.use((err, req, res, _next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || "error";
@@ -311,10 +306,10 @@ const server = app.listen(PORT, () => {
   console.log(`🌍 Environment: ${NODE_ENV}`);
   console.log(`🛡️ Security Headers: Active (Helmet.js)`);
   console.log(`🛡️ Rate Limiting: Active (100 requests/15min)`);
-  console.log(`🛡️ XSS Protection: Active (xss-clean)`);
-  console.log(`🛡️ NoSQL Injection Protection: Active (mongo-sanitize)`);
+  console.log(`🛡️ XSS Protection: Active (custom sanitizer)`);
+  console.log(`🛡️ NoSQL Injection Protection: Active (custom sanitizer)`);
   console.log(`🛡️ Parameter Pollution Protection: Active (hpp)`);
-  console.log(`📊 Database: ${mongoose.connection.name || "tourDB"}`);
+  console.log(`📊 Database: ${mongoose.connection.name || "not connected"}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API Documentation: http://localhost:${PORT}${API_VERSION}`);
   console.log(`\n📋 Available endpoints:`);
