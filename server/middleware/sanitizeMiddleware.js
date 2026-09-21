@@ -1,4 +1,8 @@
-import xss from "xss";
+import xss from "xss"; // eslint-disable-line import/no-extraneous-dependencies
+
+/* ============================================================
+   XSS SANITIZATION HELPERS
+   ============================================================ */
 
 function sanitizeString(str) {
   if (typeof str !== "string") {
@@ -20,11 +24,8 @@ function sanitizeString(str) {
   );
 
   sanitized = sanitized.replace(/ on\w+=/gi, " data-removed=");
-
   sanitized = sanitized.replace(/javascript:/gi, "blocked:");
-
   sanitized = sanitized.replace(/data:/gi, "blocked:");
-
   sanitized = sanitized.trim();
 
   return sanitized;
@@ -68,21 +69,45 @@ function sanitizeObject(obj) {
   return sanitized;
 }
 
+function safeAssign(req, prop, value) {
+  try {
+    Object.defineProperty(req, prop, {
+      value,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } catch (err) {
+    console.warn(
+      `⚠️ Could not replace req.${prop} with sanitized value:`,
+      err.message,
+    );
+  }
+}
+
+/* ============================================================
+   MAIN SANITIZATION MIDDLEWARE
+   ============================================================ */
+
 export const sanitizeData = function sanitizeDataMiddleware(req, res, next) {
-  if (req.body) {
+  if (req.body && typeof req.body === "object") {
     req.body = sanitizeObject(req.body);
   }
 
-  if (req.query) {
-    req.query = sanitizeObject(req.query);
+  if (req.params && typeof req.params === "object") {
+    safeAssign(req, "params", sanitizeObject(req.params));
   }
 
-  if (req.params) {
-    req.params = sanitizeObject(req.params);
+  if (req.query && typeof req.query === "object") {
+    safeAssign(req, "query", sanitizeObject(req.query));
   }
 
   next();
 };
+
+/* ============================================================
+   XSS FIELD SANITIZER
+   ============================================================ */
 
 export const xssSanitize = function xssSanitizeMiddleware(req, res, next) {
   const fieldsToSanitize = [
@@ -112,6 +137,10 @@ export const xssSanitize = function xssSanitizeMiddleware(req, res, next) {
 
   next();
 };
+
+/* ============================================================
+   MALICIOUS-CONTENT VALIDATOR
+   ============================================================ */
 
 export const validateSanitization = function validateSanitizationMiddleware(
   req,
