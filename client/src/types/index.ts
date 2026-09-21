@@ -65,3 +65,17 @@ export interface ApiSingleResponse<T> {
   status: "success";
   data: Record<string, T>;
 }
+
+export interface User {
+  _id: string;
+  name: string;
+  email: string;
+  role: "user" | "guide" | "lead-guide" | "admin";
+  photo?: string;
+  bio?: string;
+  phone?: string;
+  languages?: string[];
+  certifications?: string[];
+  assignedTours?: unknown[];
+  createdAt?: string;
+}
