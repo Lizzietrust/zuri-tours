@@ -79,3 +79,24 @@ export interface User {
   assignedTours?: unknown[];
   createdAt?: string;
 }
+
+export interface ReviewResponse {
+  text: string;
+  respondedBy: string | User;
+  respondedAt: string;
+}
+
+export interface Review {
+  _id: string;
+  review: string;
+  rating: number;
+  title?: string;
+  user: User | string;
+  tour: Tour | string;
+  status: "pending" | "approved" | "rejected" | "flagged";
+  helpfulCount: number;
+  isVerifiedPurchase?: boolean;
+  isRecommended?: boolean;
+  response?: ReviewResponse;
+  createdAt: string;
+}
