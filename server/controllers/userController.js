@@ -248,10 +248,6 @@ const getUser = getOne(User, {
       select: "name slug price duration difficulty ratingsAverage imageCover",
       populate: { path: "guides", select: "name email profileImage" },
     },
-    {
-      path: "bookings.tour",
-      select: "name slug price duration difficulty imageCover",
-    },
   ],
 });
 
@@ -281,12 +277,7 @@ const getUsersByRole = getAll(User, {
 
 const getUserTours = catchAsync(async (req, res) => {
   const { userId } = req.params;
-  const {
-    page = 1,
-    limit = 10,
-    sort = "-createdAt",
-    includeBookings = "false",
-  } = req.query;
+  const { page = 1, limit = 10, sort = "-createdAt" } = req.query;
 
   const isSelf = req.user._id.toString() === userId;
   const isAdmin = req.user.role === "admin";
@@ -301,7 +292,7 @@ const getUserTours = catchAsync(async (req, res) => {
   const user = await User.findOne({
     _id: userId,
     accountDeleted: false,
-  }).select("name email role assignedTours bookings");
+  }).select("name email role assignedTours");
 
   if (!user) {
     return sendNotFoundResponse(res, "User not found");
@@ -341,19 +332,6 @@ const getUserTours = catchAsync(async (req, res) => {
     isActive: true,
   });
 
-  let bookings = [];
-
-  if (includeBookings === "true" && user.bookings && user.bookings.length > 0) {
-    const bookingIds = user.bookings.map((b) => b._id || b);
-
-    bookings = await Tour.find({
-      _id: { $in: bookingIds },
-      isActive: true,
-    })
-      .select("name slug price duration difficulty imageCover startDates")
-      .lean();
-  }
-
   sendSuccessResponse(res, 200, "User tours fetched successfully", {
     user: {
       id: user._id,
@@ -368,7 +346,6 @@ const getUserTours = catchAsync(async (req, res) => {
       pages: Math.ceil(totalAssigned / limitNum),
       limit: limitNum,
     },
-    ...(includeBookings === "true" && { bookings }),
   });
 });
 
@@ -819,11 +796,6 @@ const searchUsers = catchAsync(async (req, res) => {
    /me ENDPOINTS (current authenticated user)
    ============================================================ */
 
-/**
- * Fields a user is allowed to update on their own profile.
- * Sensitive fields (password, role, email, tokens, etc.) are
- * explicitly excluded.
- */
 const ALLOWED_ME_UPDATE_FIELDS = [
   "name",
   "photo",
@@ -837,20 +809,12 @@ const ALLOWED_ME_UPDATE_FIELDS = [
   "expertise",
 ];
 
-/**
- * GET /users/me
- * Returns the currently authenticated user's profile.
- */
 const getMe = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id)
     .select(SAFE_USER_SELECT)
     .populate({
       path: "assignedTours",
       select: "name slug price duration difficulty ratingsAverage imageCover",
-    })
-    .populate({
-      path: "bookings.tour",
-      select: "name slug price duration difficulty imageCover startDates",
     })
     .lean();
 
@@ -940,10 +904,8 @@ const deleteMe = catchAsync(async (req, res, next) => {
   );
 });
 
-/**
- * PATCH /users/me/password
- * Updates the current user's password with current password verification.
- */
+/* ---------- FIXED: use matchPassword, not correctPassword ---------- */
+
 const updateMyPassword = catchAsync(async (req, res, next) => {
   const { currentPassword, password, passwordConfirm } = req.body;
 
@@ -966,7 +928,9 @@ const updateMyPassword = catchAsync(async (req, res, next) => {
     return next(new AppError("User not found", 404));
   }
 
-  const isCorrect = await user.correctPassword(currentPassword, user.password);
+  // `matchPassword` is the correct method name on the User model.
+  // It reads `this.password` internally, so pass only the entered password.
+  const isCorrect = await user.matchPassword(currentPassword);
 
   if (!isCorrect) {
     return next(new AppError("Your current password is incorrect", 401));
