@@ -221,9 +221,13 @@ export const forgotPassword = catchAsync(async (req, res) => {
   await user.save({ validateBeforeSave: false });
 
   try {
-    const resetURL = `${req.protocol}://${req.get(
-      "host",
-    )}/api/v1/auth/resetpassword/${resetToken}`;
+    // Send the user to the CLIENT reset page, not the API endpoint.
+    // The client will read the token from the URL and call
+    // PUT /api/v1/auth/resetpassword/:token with the new password.
+    const clientUrl =
+      process.env.CLIENT_URL?.split(",")[0]?.trim() || "http://localhost:3002";
+
+    const resetURL = `${clientUrl}/reset-password/${resetToken}`;
 
     await new Email(user, resetURL).sendPasswordReset();
 
