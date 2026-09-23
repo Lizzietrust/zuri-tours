@@ -1,11 +1,9 @@
+// app/tours/page.tsx
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { tourService } from "@/services/tours";
+import { useTours } from "@/hooks/useTours";
 import TourCard from "@/components/tours/TourCard";
 import type { Tour } from "@/types";
-
-/* ---------- Skeleton card ---------- */
 
 function TourCardSkeleton() {
   return (
@@ -23,8 +21,6 @@ function TourCardSkeleton() {
     </div>
   );
 }
-
-/* ---------- Inline error banner ---------- */
 
 function ErrorBanner({
   message,
@@ -55,16 +51,8 @@ function ErrorBanner({
   );
 }
 
-/* ---------- Page ---------- */
-
 export default function ToursPage() {
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["tours"],
-    queryFn: () => tourService.getAll(),
-    // Don't flip into an error state on a single failure if we have data
-    // from a previous successful fetch — keep showing stale data.
-    placeholderData: (previous) => previous,
-  });
+  const { data, isLoading, isError, error, refetch, isFetching } = useTours();
 
   const tours = (data?.data?.tours || []) as Tour[];
   const errorMessage =
@@ -73,7 +61,6 @@ export default function ToursPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
-      {/* ---------- Header ---------- */}
       <div className="mb-8 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">
@@ -83,7 +70,6 @@ export default function ToursPage() {
             Handpicked adventures around the world
           </p>
         </div>
-
         {!isLoading && !isError && tours.length > 0 && (
           <span className="hidden text-sm text-gray-500 sm:inline">
             {tours.length} {tours.length === 1 ? "tour" : "tours"}
@@ -91,14 +77,12 @@ export default function ToursPage() {
         )}
       </div>
 
-      {/* ---------- Error banner (non-blocking) ---------- */}
       {isError && (
         <div className="mb-6">
           <ErrorBanner message={errorMessage} onRetry={() => refetch()} />
         </div>
       )}
 
-      {/* ---------- Loading skeletons ---------- */}
       {isLoading && (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -107,7 +91,6 @@ export default function ToursPage() {
         </div>
       )}
 
-      {/* ---------- Empty state ---------- */}
       {!isLoading && !isError && tours.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center">
           <span className="text-4xl">🧭</span>
@@ -115,13 +98,11 @@ export default function ToursPage() {
             No tours yet
           </h2>
           <p className="mt-1 max-w-md text-sm text-gray-500">
-            We haven&apos;t published any tours. Check back soon or try a
-            different filter.
+            We haven&apos;t published any tours. Check back soon.
           </p>
         </div>
       )}
 
-      {/* ---------- Tours grid ---------- */}
       {!isLoading && tours.length > 0 && (
         <>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -129,8 +110,6 @@ export default function ToursPage() {
               <TourCard key={tour._id} tour={tour} />
             ))}
           </div>
-
-          {/* Subtle "refreshing" indicator when a background refetch runs */}
           {isFetching && (
             <p className="mt-6 text-center text-xs text-gray-400">
               Refreshing…
