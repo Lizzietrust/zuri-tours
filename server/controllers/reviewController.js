@@ -861,11 +861,6 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
    DUPLICATE-PREVENTION HELPERS — new custom handlers
    ============================================================ */
 
-/**
- * GET /reviews/me/:tourId
- * Returns the current user's review for a specific tour (populated).
- * 404 if the user has not reviewed the tour yet.
- */
 const getMyReviewForTour = catchAsync(async (req, res, next) => {
   const tourId = req.params.tourId || req.params.id;
 
@@ -878,22 +873,12 @@ const getMyReviewForTour = catchAsync(async (req, res, next) => {
     tourId,
   );
 
-  if (!review) {
-    return next(new AppError("You have not reviewed this tour yet", 404));
-  }
-
-  res.status(200).json({
+  return res.status(200).json({
     status: "success",
-    data: { review },
+    data: { review: review || null },
   });
 });
 
-/**
- * PATCH /reviews/me/:tourId
- * Update the current user's review for a specific tour.
- * Uses the schema's `editReview` method so `editHistory` is preserved
- * and `status` is reset to "pending" if the review was approved.
- */
 const updateMyReview = catchAsync(async (req, res, next) => {
   const tourId = req.params.tourId || req.params.id;
 
