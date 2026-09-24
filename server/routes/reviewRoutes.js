@@ -32,6 +32,10 @@ import {
 
 const router = express.Router({ mergeParams: true });
 
+/* ============================================================
+   STATIC / NAMED ROUTES — MUST come before /:id
+   ============================================================ */
+
 /* ---------- Current user's own review for a specific tour ---------- */
 
 router
@@ -39,27 +43,35 @@ router
   .get(protect, getMyReviewForTour)
   .patch(protect, userUpdateLimiter, validateReview, updateMyReview);
 
-/* ---------- Root ---------- */
+/* ---------- Custom collection routes ---------- */
+
+router.route("/stats").get(getReviewStats);
+router.route("/public").get(getTourReviews);
+router.route("/my-reviews").get(protect, getMyReviews);
+router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
+
+/* ---------- Root collection ---------- */
 
 router
   .route("/")
   .get(getAllReviews)
   .post(protect, reviewCreationLimiter, validateReview, createReview);
 
-/* ---------- Single review ---------- */
+/* ---------- Bulk (also static) ---------- */
+
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteReviews);
+
+/* ============================================================
+   PARAM ROUTES — /:id must come LAST
+   ============================================================ */
 
 router
   .route("/:id")
   .get(getReview)
   .patch(protect, checkValidId, userUpdateLimiter, validateReview, updateReview)
   .delete(protect, checkValidId, deleteReview);
-
-/* ---------- Custom routes (order matters!) ---------- */
-
-router.route("/stats").get(getReviewStats);
-router.route("/public").get(getTourReviews);
-router.route("/my-reviews").get(protect, getMyReviews);
-router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
 
 /* ---------- Actions on a specific review ---------- */
 
@@ -102,11 +114,5 @@ router
 router
   .route("/:id/restore")
   .patch(protect, authorize("admin"), checkValidId, restoreReview);
-
-/* ---------- Bulk ---------- */
-
-router
-  .route("/bulk/delete")
-  .delete(protect, authorize("admin"), bulkDeleteReviews);
 
 export default router;
