@@ -53,9 +53,25 @@ export const securityHeaders = (req, res, next) => {
 
   res.setHeader("X-Download-Options", "noopen");
 
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  /* ------------------------------------------------------------------
+     Cross-Origin-* headers — path-aware.
+     
+     Static assets under /img must be readable by other origins
+     (e.g. the Next.js frontend on :3002), so we relax CORP and skip
+     COEP for those. Everywhere else we keep the strict defaults.
+     ------------------------------------------------------------------ */
+  const isStaticAsset =
+    req.path.startsWith("/img/") ||
+    /\.(jpg|jpeg|png|gif|webp|avif|svg|ico)$/i.test(req.path);
 
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  if (isStaticAsset) {
+    // Allow the image to be embedded cross-origin (Next.js on :3002)
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    // Do NOT set COEP: require-corp here — it would block cross-origin reads
+  } else {
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  }
 
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 
@@ -81,7 +97,8 @@ export const contentSecurityPolicyHeaders = (req, res, next) => {
         "base-uri 'self'",
         "font-src 'self' https: data:",
         "frame-src 'self'",
-        "img-src 'self' data: https:",
+        // Allow images from localhost (dev) and any HTTPS origin (prod)
+        "img-src 'self' data: http: https:",
         "object-src 'none'",
         "script-src 'self'",
         "script-src-attr 'none'",
