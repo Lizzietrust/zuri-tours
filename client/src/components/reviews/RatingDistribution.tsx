@@ -6,9 +6,11 @@ import StarRating from "./StarRating";
 import Skeleton from "@/components/ui/Skeleton";
 
 export default function RatingDistribution({ tourId }: { tourId: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["review-stats", tourId],
     queryFn: () => reviewService.getStats(tourId),
+    enabled: !!tourId,
+    staleTime: 1000 * 60 * 5,
   });
 
   if (isLoading) {
@@ -21,12 +23,20 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
     );
   }
 
-  const stats = data?.stats as {
+  if (isError || !data) {
+    return (
+      <p className="text-sm text-gray-500">
+        Couldn&apos;t load rating summary.
+      </p>
+    );
+  }
+
+  const stats = data.stats as {
     totalReviews?: number;
     averageRating?: number;
   };
 
-  const distribution = data?.distribution?.percentages || [];
+  const distribution = data.distribution?.percentages || [];
 
   return (
     <div>
