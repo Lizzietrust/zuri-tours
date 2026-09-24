@@ -11,21 +11,97 @@ import ReviewList from "@/components/reviews/ReviewList";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { imageUrl } from "@/services/tours";
 import { useTour } from "@/hooks/useTours";
-import type { Tour } from "@/types";
 
-export default function TourDetailClient({
-  slug,
-  initialTour,
+function TourDetailSkeleton() {
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-12">
+      <div className="animate-pulse rounded bg-gray-200 h-8 w-48" />
+      <div className="mt-6 grid gap-8 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <div className="animate-pulse bg-gray-200 aspect-video w-full rounded-2xl" />
+          <div className="animate-pulse rounded bg-gray-200 mt-6 h-6 w-2/3" />
+          <div className="animate-pulse rounded bg-gray-200 mt-3 h-4 w-full" />
+          <div className="animate-pulse rounded bg-gray-200 mt-2 h-4 w-5/6" />
+          <div className="animate-pulse bg-gray-200 mt-8 h-32 w-full rounded-2xl" />
+        </div>
+        <aside>
+          <div className="animate-pulse bg-gray-200 h-64 w-full rounded-2xl" />
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function ErrorBanner({
+  message,
+  onRetry,
 }: {
-  slug: string;
-  initialTour: Tour;
+  message: string;
+  onRetry: () => void;
 }) {
-  const { data } = useTour(slug, initialTour);
+  return (
+    <div className="mx-auto max-w-2xl px-6 py-24">
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
+            !
+          </span>
+          <div>
+            <p className="font-medium text-red-800">
+              Couldn&apos;t load this tour
+            </p>
+            <p className="text-sm text-red-600">{message}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
 
-  // Prefer fresh client data, fall back to SSR-provided tour
-  const tour = (data?.data?.tour ??
-    data?.data?.document ??
-    initialTour) as Tour;
+function TourNotFound() {
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col items-center justify-center px-6 py-24 text-center">
+      <span className="text-5xl">🔍</span>
+      <h1 className="mt-4 text-2xl font-bold text-gray-900">Tour not found</h1>
+      <p className="mt-2 text-sm text-gray-600">
+        The tour you&apos;re looking for doesn&apos;t exist or has been removed.
+      </p>
+      <Link
+        href="/tours"
+        className="mt-6 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+      >
+        Browse all tours
+      </Link>
+    </div>
+  );
+}
+
+export default function TourDetailClient({ slug }: { slug: string }) {
+  const { data, isLoading, isError, error, refetch } = useTour(slug);
+
+  const tour = data?.data?.tour;
+
+  if (isLoading) return <TourDetailSkeleton />;
+
+  if (isError) {
+    // Log full error so you can see it in DevTools
+    console.error("[TourDetailClient] fetch error:", error);
+    return (
+      <ErrorBanner
+        message={(error as Error)?.message || "Failed to load"}
+        onRetry={refetch}
+      />
+    );
+  }
+
+  if (!tour) return <TourNotFound />;
 
   const hasDiscount =
     typeof tour.priceDiscount === "number" &&
@@ -55,8 +131,7 @@ export default function TourDetailClient({
 
       <div className="grid gap-10 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          {/* Hero */}
-          <div className="relative aspect-[16/9] w-full overflow-hidden rounded-2xl bg-gray-100">
+          <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-gray-100">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl(tour.imageCover)}
@@ -74,7 +149,6 @@ export default function TourDetailClient({
             )}
           </div>
 
-          {/* Title */}
           <div className="mt-6">
             <div className="flex flex-wrap items-center gap-3">
               <Badge variant={difficultyVariant}>
@@ -104,7 +178,6 @@ export default function TourDetailClient({
             </div>
           </div>
 
-          {/* Quick facts */}
           <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {[
               {
@@ -191,7 +264,6 @@ export default function TourDetailClient({
           </Card>
         </div>
 
-        {/* Sidebar */}
         <aside className="lg:col-span-1">
           <div className="sticky top-24 space-y-4">
             <Card>
