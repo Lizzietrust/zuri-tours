@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Tour } from "@/types";
 import { formatCurrency } from "@/lib/utils";
+import { imageUrl } from "@/services/tours";
 
 /* ---------- Difficulty badge ---------- */
 
@@ -119,11 +120,11 @@ export default function TourCard({ tour }: { tour: Tour }) {
       <div className="relative aspect-4/3 w-full overflow-hidden bg-linear-to-br from-emerald-100 to-emerald-50">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={`http://localhost:8000/img/tours/${tour.imageCover}`}
+          src={imageUrl(tour.imageCover)}
           alt={tour.name}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           onError={(e) => {
-            (e.target as HTMLImageElement).style.opacity = "0";
+            (e.target as HTMLImageElement).src = "/placeholder-tour.jpg";
           }}
         />
 
