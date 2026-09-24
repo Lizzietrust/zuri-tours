@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { reviewService } from "@/services/reviews";
@@ -11,46 +11,41 @@ import Input from "@/components/ui/Input";
 import StarInput from "./StarInput";
 import type { Review } from "@/types";
 
-export default function ReviewForm({ tourId }: { tourId: string }) {
-  const { user, isAuthenticated } = useAuth();
+type ReviewFormValues = {
+  rating: number;
+  title: string;
+  review: string;
+  isRecommended: boolean;
+};
+
+type ReviewFormInnerProps = {
+  tourId: string;
+  initialReview: Review | null;
+};
+
+function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
   const queryClient = useQueryClient();
 
-  const [rating, setRating] = useState(0);
-  const [title, setTitle] = useState("");
-  const [reviewText, setReviewText] = useState("");
-  const [isRecommended, setIsRecommended] = useState(true);
+  const [rating, setRating] = useState(initialReview?.rating ?? 0);
+  const [title, setTitle] = useState(initialReview?.title ?? "");
+  const [reviewText, setReviewText] = useState(initialReview?.review ?? "");
+  const [isRecommended, setIsRecommended] = useState(
+    initialReview?.isRecommended ?? true,
+  );
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  /* ---------- Existing review for this user? ---------- */
-  const { data: myReview, isLoading: myReviewLoading } = useQuery({
-    queryKey: ["my-review", tourId],
-    queryFn: () => reviewService.getMyReviewForTour(tourId),
-    enabled: isAuthenticated,
-    retry: false,
-  });
-
-  /* ---------- Prefill form if an existing review exists ---------- */
-  useEffect(() => {
-    if (myReview) {
-      setRating(myReview.rating);
-      setTitle(myReview.title || "");
-      setReviewText(myReview.review);
-      setIsRecommended(myReview.isRecommended ?? true);
-    }
-  }, [myReview]);
+  const isEditing = !!initialReview;
 
   /* ---------- Mutations ---------- */
   const createMutation = useMutation({
-    mutationFn: (input: {
-      review: string;
-      rating: number;
-      title?: string;
-      isRecommended?: boolean;
-    }) => reviewService.create(tourId, input),
+    mutationFn: (input: ReviewFormValues) =>
+      reviewService.create(tourId, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
       queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
+      queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
       queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
       setSuccess("Review submitted successfully. Thank you!");
       setError(null);
@@ -61,15 +56,12 @@ export default function ReviewForm({ tourId }: { tourId: string }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (input: {
-      review?: string;
-      rating?: number;
-      title?: string;
-      isRecommended?: boolean;
-    }) => reviewService.updateMy(tourId, input),
+    mutationFn: (input: Partial<ReviewFormValues>) =>
+      reviewService.updateMy(tourId, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
       queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
+      queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
       queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
       setSuccess("Review updated successfully.");
       setError(null);
@@ -79,30 +71,6 @@ export default function ReviewForm({ tourId }: { tourId: string }) {
     },
   });
 
-  /* ---------- Not logged in → prompt to log in ---------- */
-  if (!isAuthenticated) {
-    return (
-      <Alert
-        type="info"
-        title="Want to leave a review?"
-        message="Please log in to share your experience with this tour."
-        action={
-          <Link
-            href={`/login?redirect=/tours`}
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
-          >
-            Log in
-          </Link>
-        }
-      />
-    );
-  }
-
-  if (myReviewLoading) {
-    return <p className="text-sm text-gray-500">Loading your review…</p>;
-  }
-
-  const isEditing = !!myReview;
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -118,10 +86,14 @@ export default function ReviewForm({ tourId }: { tourId: string }) {
       setError("Review must be at least 5 characters.");
       return;
     }
+    if (reviewText.trim().length > 500) {
+      setError("Review cannot exceed 500 characters.");
+      return;
+    }
 
-    const payload = {
+    const payload: ReviewFormValues = {
       rating,
-      title: title.trim() || undefined,
+      title: title.trim(),
       review: reviewText.trim(),
       isRecommended,
     };
@@ -193,11 +165,59 @@ export default function ReviewForm({ tourId }: { tourId: string }) {
         </Button>
       </div>
 
-      {isEditing && myReview?.status === "approved" && (
+      {isEditing && initialReview?.status === "approved" && (
         <p className="text-xs text-gray-500">
           Updating your review will send it back for moderation.
         </p>
       )}
     </form>
+  );
+}
+
+/* ----------------------------------------------------------------
+   Outer wrapper — decides whether to render the form, a login
+   prompt, or a loading state. Passes the review through as a
+   plain prop; no local state, no effects.
+   ---------------------------------------------------------------- */
+export default function ReviewForm({ tourId }: { tourId: string }) {
+  const { isAuthenticated } = useAuth();
+
+  const { data: myReview, isLoading: myReviewLoading } = useQuery({
+    queryKey: ["my-review", tourId],
+    queryFn: () => reviewService.getMyReviewForTour(tourId),
+    enabled: isAuthenticated && !!tourId,
+    retry: false,
+    staleTime: 1000 * 60,
+  });
+
+  /* ---------- Not logged in → prompt to log in ---------- */
+  if (!isAuthenticated) {
+    return (
+      <Alert
+        type="info"
+        title="Want to leave a review?"
+        message="Please log in to share your experience with this tour."
+        action={
+          <Link
+            href={`/login?redirect=/tours`}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Log in
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (myReviewLoading) {
+    return <p className="text-sm text-gray-500">Loading your review…</p>;
+  }
+
+  return (
+    <ReviewFormInner
+      key={myReview?._id ?? "new-review"}
+      tourId={tourId}
+      initialReview={myReview ?? null}
+    />
   );
 }
