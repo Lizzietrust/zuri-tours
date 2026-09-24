@@ -16,7 +16,9 @@ export default function ReviewList({ tourId }: { tourId: string }) {
   const { data, isLoading, isError, error, isFetching } = useQuery({
     queryKey: ["reviews", tourId, { page, sort }],
     queryFn: () => reviewService.getForTour(tourId, { page, limit, sort }),
+    enabled: !!tourId,
     placeholderData: (prev) => prev,
+    staleTime: 1000 * 60,
   });
 
   const reviews = (data?.data?.reviews || []) as Review[];
@@ -87,7 +89,6 @@ export default function ReviewList({ tourId }: { tourId: string }) {
             ))}
           </div>
 
-          {/* Pagination */}
           {pages > 1 && (
             <div className="mt-6 flex items-center justify-between">
               <button
