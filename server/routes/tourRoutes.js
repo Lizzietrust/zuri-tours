@@ -25,11 +25,9 @@ import {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
-  // ----- geospatial point handlers -----
   getToursWithin,
   getToursNear,
   getDistanceFromTour,
-  // ----- geospatial aggregation handlers -----
   getToursNearAggregate,
   getDistanceStats,
   getDistanceDistribution,
@@ -80,53 +78,21 @@ router.route("/search").get(searchTours);
 
 /* ---------- Point queries ---------- */
 
-/**
- * Radius search with path params.
- *   GET /tours/within/50/center/40.7128,-74.0060/unit/km
- *
- * Optional query params: difficulty, category, minPrice, maxPrice,
- * page, limit, populateReviews, populateGuides.
- */
 router
   .route("/within/:distance/center/:latlng/unit/:unit")
   .get(validateGeospatialParams, getToursWithin);
 
-/**
- * Radius search with query-string params (friendlier for JS clients).
- *   GET /tours/near?lat=40.7128&lng=-74.0060&distance=50&unit=km
- */
 router.route("/near").get(getToursNear);
 
 /* ---------- Aggregation queries ---------- */
 
-/**
- * $geoNear aggregation with DB-side distance + sorting + pagination + count.
- *   GET /tours/near-aggregate?lat=&lng=&distance=&unit=&page=&limit=&sortBy=
- */
 router.route("/near-aggregate").get(getToursNearAggregate);
-
-/**
- * Distance statistics (min/max/avg/count) around a point.
- *   GET /tours/distance-stats?lat=&lng=&distance=&unit=&groupBy=
- */
 router.route("/distance-stats").get(getDistanceStats);
-
-/**
- * Distance histogram — how many tours fall into each distance bucket.
- *   GET /tours/distance-distribution?lat=&lng=&distance=&unit=&buckets=
- */
 router.route("/distance-distribution").get(getDistanceDistribution);
-
-/**
- * Batch distances from one point to a list of tour IDs.
- *   POST /tours/batch-distance
- *   Body: { tourIds: [...], lat, lng, unit }
- */
 router.route("/batch-distance").post(getBatchDistances);
 
 /* ============================================================
    AUTHENTICATED NON-ADMIN ROUTES
-   (MUST be declared before /:id to avoid being shadowed)
    ============================================================ */
 
 router
