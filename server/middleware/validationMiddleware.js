@@ -7,12 +7,6 @@ import { sendValidationErrorResponse } from "../utils/responseHelper.js";
    VALIDATION RESULT HELPERS
    ============================================================ */
 
-/**
- * Handle validation results from express-validator
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {Function} next - Express next function
- */
 export const validateResult = (req, res, next) => {
   const errors = validationResult(req);
 
@@ -26,9 +20,6 @@ export const validateResult = (req, res, next) => {
 
 /**
  * Handle validation results with response helper
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {Function} next - Express next function
  */
 export const validateResultWithResponse = (req, res, next) => {
   const errors = validationResult(req);
@@ -128,15 +119,6 @@ export const validateReviewId = [
 
 /* ============================================================
    GEOSPATIAL PARAMS — latlng / distance / unit
-   ============================================================
-   Used by:
-     - GET /tours/within/:distance/center/:latlng/unit/:unit
-     - GET /tours/:id/distance-to/:latlng/unit/:unit
-
-   NOTE: This middleware is intentionally synchronous. It performs
-   no I/O, so it does NOT need to be wrapped in `catchAsync`.
-   Express catches synchronous throws and forwards them to the
-   global error handler automatically.
    ============================================================ */
 
 const SUPPORTED_GEO_UNITS = ["m", "km", "mi", "nm"];
@@ -201,8 +183,19 @@ export const validateGeospatialParams = (req, res, next) => {
    REVIEW VALIDATION
    ============================================================ */
 
+/**
+ * Used on:
+ *   - POST   /tours/:tourId/reviews       (create a review)
+ *   - PATCH  /reviews/:id                 (update a review — admin/owner)
+ *   - PATCH  /reviews/me/:tourId          (update my review for a tour)
+ *
+ * NOTE: `tourId` is NOT required in the body — it comes from the URL
+ * params via mergeParams in reviewRoutes.js. It is validated optionally
+ * here only if it happens to be in the body.
+ */
 export const validateReview = [
   body("review")
+    .trim()
     .notEmpty()
     .withMessage("Review text is required")
     .isString()
@@ -220,6 +213,7 @@ export const validateReview = [
 
   body("title")
     .optional()
+    .trim()
     .isString()
     .withMessage("Title must be a string")
     .isLength({ max: 100 })
@@ -236,10 +230,11 @@ export const validateReview = [
 ];
 
 /**
- * Validate review with response helper
+ * Validate review with response helper (returns structured errors).
  */
 export const validateReviewWithResponse = [
   body("review")
+    .trim()
     .notEmpty()
     .withMessage("Review text is required")
     .isString()
@@ -257,6 +252,7 @@ export const validateReviewWithResponse = [
 
   body("title")
     .optional()
+    .trim()
     .isString()
     .withMessage("Title must be a string")
     .isLength({ max: 100 })
@@ -310,7 +306,7 @@ export const checkTourBody = (req, res, next) => {
 };
 
 /**
- * Validate tour body using express-validator
+ * Validate tour body using express-validator.
  */
 export const validateTourBody = [
   body("name")
@@ -417,7 +413,7 @@ export const validateUser = (req, res, next) => {
 };
 
 /**
- * Validate user using express-validator
+ * Validate user using express-validator.
  */
 export const validateUserWithExpress = [
   body("name")
@@ -522,7 +518,7 @@ export const validateAuth = (req, res, next) => {
 };
 
 /**
- * Validate auth using express-validator
+ * Validate auth using express-validator.
  */
 export const validateAuthWithExpress = [
   body("email")
