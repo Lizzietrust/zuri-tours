@@ -69,7 +69,7 @@ app.use(
         baseUri: ["'self'"],
         fontSrc: ["'self'", "https:", "data:"],
         frameSrc: ["'self'"],
-        imgSrc: ["'self'", "data:", "https:"],
+        imgSrc: ["'self'", "data:", "https:", "http:"],
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
         scriptSrcAttr: ["'none'"],
@@ -77,8 +77,8 @@ app.use(
         upgradeInsecureRequests: [],
       },
     },
-
     crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
     hsts: {
       maxAge: 31536000,
       includeSubDomains: true,
@@ -158,21 +158,14 @@ app.use(
 app.use("/api", apiLimiter || generalLimiter);
 
 /* ---------- Static files (images) ---------- */
-/*
- * Serves files from server/public/img/ at the /img URL prefix.
- *
- *   /img/tours/snow-adventurer-cover.jpg
- *     → server/public/img/tours/snow-adventurer-cover.jpg
- *
- * Placed AFTER compression (static is already efficient; compression
- * only adds CPU overhead for JPEGs) and BEFORE the routes, so /img/*
- * never falls through to the API or the 404 handler for valid files.
- *
- * fallthrough: true → missing files fall through to the 404 handler
- *                    below so you still get a proper JSON error.
- */
+
 app.use(
   "/img",
+  (req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
   express.static(path.join(__dirname, "public", "img"), {
     maxAge: "7d",
     fallthrough: true,
