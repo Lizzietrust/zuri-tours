@@ -6,6 +6,8 @@ import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
 import hpp from "hpp";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import tourRouter from "./routes/tourRoutes.js";
 import reviewRouter from "./routes/reviewRoutes.js";
@@ -21,6 +23,10 @@ import { sanitizeData } from "./middleware/sanitizeMiddleware.js";
 import { AppError } from "./utils/appError.js";
 
 dotenv.config();
+
+/* ---------- ESM path helpers ---------- */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 
@@ -71,6 +77,8 @@ app.use(
         upgradeInsecureRequests: [],
       },
     },
+
+    crossOriginResourcePolicy: { policy: "cross-origin" },
     hsts: {
       maxAge: 31536000,
       includeSubDomains: true,
@@ -148,6 +156,30 @@ app.use(
 /* ---------- Rate limiting ---------- */
 
 app.use("/api", apiLimiter || generalLimiter);
+
+/* ---------- Static files (images) ---------- */
+/*
+ * Serves files from server/public/img/ at the /img URL prefix.
+ *
+ *   /img/tours/snow-adventurer-cover.jpg
+ *     → server/public/img/tours/snow-adventurer-cover.jpg
+ *
+ * Placed AFTER compression (static is already efficient; compression
+ * only adds CPU overhead for JPEGs) and BEFORE the routes, so /img/*
+ * never falls through to the API or the 404 handler for valid files.
+ *
+ * fallthrough: true → missing files fall through to the 404 handler
+ *                    below so you still get a proper JSON error.
+ */
+app.use(
+  "/img",
+  express.static(path.join(__dirname, "public", "img"), {
+    maxAge: "7d",
+    fallthrough: true,
+    index: false,
+    dotfiles: "ignore",
+  }),
+);
 
 /* ---------- Request logger ---------- */
 
@@ -310,6 +342,9 @@ const server = app.listen(PORT, () => {
   console.log(`🛡️ NoSQL Injection Protection: Active (custom sanitizer)`);
   console.log(`🛡️ Parameter Pollution Protection: Active (hpp)`);
   console.log(`📊 Database: ${mongoose.connection.name || "not connected"}`);
+  console.log(
+    `📁 Static images: /img → ${path.join(__dirname, "public", "img")}`,
+  );
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API Documentation: http://localhost:${PORT}${API_VERSION}`);
   console.log(`\n📋 Available endpoints:`);
@@ -318,6 +353,7 @@ const server = app.listen(PORT, () => {
   console.log(`   - Tours:   ${API_VERSION}/tours`);
   console.log(`   - Reviews: ${API_VERSION}/reviews`);
   console.log(`   - Health:  /health`);
+  console.log(`   - Images:  /img/tours/*`);
 });
 
 /* ---------- Graceful shutdown ---------- */
