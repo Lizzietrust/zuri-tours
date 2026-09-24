@@ -15,6 +15,68 @@ export interface UpdateReviewInput {
   isRecommended?: boolean;
 }
 
+/* ---------- Response shape helpers ---------- */
+
+type TourReviewsResponse = {
+  status: string;
+  results: number;
+  total: number;
+  page: number;
+  pages: number;
+  data: {
+    reviews:
+      | Review[]
+      | {
+          data: Review[];
+          total: number;
+          page: number;
+          pages: number;
+          limit: number;
+        };
+  };
+};
+
+type StatsResponse = {
+  status: string;
+  data: {
+    stats: Record<string, unknown>;
+    distribution: {
+      distribution: { rating: number; count: number }[];
+      percentages: { rating: number; count: number; percentage: number }[];
+      total: number;
+    };
+    recentReviews?: Review[];
+  };
+};
+
+/* ---------- Normalize ---------- */
+
+function normalizeTourReviewsPayload(
+  raw: TourReviewsResponse,
+): ApiListResponse<Review> {
+  const r = raw.data.reviews;
+
+  if (Array.isArray(r)) {
+    return {
+      status: "success",
+      results: raw.results ?? r.length,
+      total: raw.total ?? r.length,
+      page: raw.page ?? 1,
+      pages: raw.pages ?? 1,
+      data: { reviews: r },
+    };
+  }
+
+  return {
+    status: "success",
+    results: r.data.length,
+    total: r.total,
+    page: r.page,
+    pages: r.pages,
+    data: { reviews: r.data },
+  };
+}
+
 export const reviewService = {
   /* ---------- List reviews for a tour ---------- */
   async getForTour(
@@ -28,17 +90,18 @@ export const reviewService = {
       helpful?: boolean;
     },
   ): Promise<ApiListResponse<Review>> {
-    const { data } = await api.get<ApiListResponse<Review>>(
+    const { data } = await api.get<TourReviewsResponse>(
       `/tours/${tourId}/reviews`,
       { params },
     );
-    return data;
+
+    return normalizeTourReviewsPayload(data);
   },
 
   /* ---------- Get logged-in user's review for a tour ---------- */
   async getMyReviewForTour(tourId: string): Promise<Review | null> {
     try {
-      const { data } = await api.get(`/tours/${tourId}/reviews/me`);
+      const { data } = await api.get(`/reviews/me/${tourId}`);
       return data.data.review as Review;
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode;
@@ -47,7 +110,7 @@ export const reviewService = {
     }
   },
 
-  /* ---------- Create a new review ---------- */
+  /* ---------- Create a new review for a tour ---------- */
   async create(tourId: string, input: CreateReviewInput): Promise<Review> {
     const { data } = await api.post(`/tours/${tourId}/reviews`, input);
     return data.data.review as Review;
@@ -55,7 +118,7 @@ export const reviewService = {
 
   /* ---------- Update own review for a tour ---------- */
   async updateMy(tourId: string, input: UpdateReviewInput): Promise<Review> {
-    const { data } = await api.patch(`/tours/${tourId}/reviews/me`, input);
+    const { data } = await api.patch(`/reviews/me/${tourId}`, input);
     return data.data.review as Review;
   },
 
@@ -78,9 +141,13 @@ export const reviewService = {
       total: number;
     };
   }> {
-    const { data } = await api.get(`/reviews/stats`, {
+    const { data } = await api.get<StatsResponse>(`/reviews/stats`, {
       params: { tourId },
     });
-    return data.data;
+
+    return {
+      stats: data.data.stats,
+      distribution: data.data.distribution,
+    };
   },
 };
