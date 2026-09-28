@@ -1,13 +1,14 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { tourService } from "@/services/tours";
+import type { TourQueryParams } from "@/types";
 
-export function useTours() {
+export function useTours(params: TourQueryParams = {}) {
   return useQuery({
-    queryKey: ["tours"],
-    queryFn: () => tourService.getAll(),
-    placeholderData: (previous) => previous,
+    queryKey: ["tours", params],
+    queryFn: () => tourService.getAll(params),
+    placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
   });
 }
