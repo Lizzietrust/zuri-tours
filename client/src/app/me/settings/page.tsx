@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/services/auth";
+
+type Status = {
+  type: "idle" | "saving" | "ok" | "error";
+  message?: string;
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -14,15 +19,12 @@ export default function SettingsPage() {
 
   /* ---------- Profile form ---------- */
   const [profileForm, setProfileForm] = useState({
-    name: user?.name || "",
-    email: user?.email || "",
-    bio: user?.bio || "",
-    phone: user?.phone || "",
+    name: "",
+    email: "",
+    bio: "",
+    phone: "",
   });
-  const [profileStatus, setProfileStatus] = useState<{
-    type: "idle" | "saving" | "ok" | "error";
-    message?: string;
-  }>({ type: "idle" });
+  const [profileStatus, setProfileStatus] = useState<Status>({ type: "idle" });
 
   /* ---------- Password form ---------- */
   const [pwForm, setPwForm] = useState({
@@ -30,14 +32,22 @@ export default function SettingsPage() {
     password: "",
     passwordConfirm: "",
   });
-  const [pwStatus, setPwStatus] = useState<{
-    type: "idle" | "saving" | "ok" | "error";
-    message?: string;
-  }>({ type: "idle" });
+  const [pwStatus, setPwStatus] = useState<Status>({ type: "idle" });
 
   /* ---------- Delete account ---------- */
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  /* Sync form state when user loads / changes */
+  useEffect(() => {
+    if (!user) return;
+    setProfileForm({
+      name: user.name ?? "",
+      email: user.email ?? "",
+      bio: user.bio ?? "",
+      phone: user.phone ?? "",
+    });
+  }, [user]);
 
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,19 +64,25 @@ export default function SettingsPage() {
     } catch (err) {
       setProfileStatus({
         type: "error",
-        message: (err as { message: string }).message,
+        message: (err as { message: string }).message ?? "Something went wrong",
       });
     }
   };
 
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPwStatus({ type: "saving" });
 
     if (pwForm.password !== pwForm.passwordConfirm) {
       setPwStatus({ type: "error", message: "Passwords do not match" });
       return;
     }
+
+    if (!pwForm.currentPassword || !pwForm.password) {
+      setPwStatus({ type: "error", message: "Please fill in all fields" });
+      return;
+    }
+
+    setPwStatus({ type: "saving" });
 
     try {
       await authService.updatePassword(pwForm);
@@ -74,14 +90,14 @@ export default function SettingsPage() {
         type: "ok",
         message: "Password updated. Please log in again.",
       });
+      setPwForm({ currentPassword: "", password: "", passwordConfirm: "" });
       setTimeout(() => {
         router.push("/login");
-        router.refresh();
       }, 1500);
     } catch (err) {
       setPwStatus({
         type: "error",
-        message: (err as { message: string }).message,
+        message: (err as { message: string }).message ?? "Something went wrong",
       });
     }
   };
@@ -91,10 +107,11 @@ export default function SettingsPage() {
     try {
       await authService.deleteMe();
       queryClient.setQueryData(["me"], null);
+      queryClient.removeQueries({ queryKey: ["me"] });
       router.push("/");
       router.refresh();
     } catch (err) {
-      alert((err as { message: string }).message);
+      alert((err as { message: string }).message ?? "Failed to delete account");
     } finally {
       setDeleteLoading(false);
     }
@@ -136,6 +153,17 @@ export default function SettingsPage() {
               />
             </div>
             <div className="sm:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Phone</label>
+              <input
+                type="tel"
+                value={profileForm.phone}
+                onChange={(e) =>
+                  setProfileForm({ ...profileForm, phone: e.target.value })
+                }
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+              />
+            </div>
+            <div className="sm:col-span-2">
               <label className="mb-1 block text-sm font-medium">Bio</label>
               <textarea
                 rows={3}
@@ -162,7 +190,7 @@ export default function SettingsPage() {
 
           <button
             type="submit"
-            disabled={profileStatus.type === "saving"}
+            disabled={profileStatus.type === "saving" || !user}
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
           >
             {profileStatus.type === "saving" ? "Saving…" : "Save changes"}
@@ -182,6 +210,7 @@ export default function SettingsPage() {
             </label>
             <input
               type="password"
+              autoComplete="current-password"
               value={pwForm.currentPassword}
               onChange={(e) =>
                 setPwForm({ ...pwForm, currentPassword: e.target.value })
@@ -196,6 +225,7 @@ export default function SettingsPage() {
               </label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={pwForm.password}
                 onChange={(e) =>
                   setPwForm({ ...pwForm, password: e.target.value })
@@ -209,6 +239,7 @@ export default function SettingsPage() {
               </label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={pwForm.passwordConfirm}
                 onChange={(e) =>
                   setPwForm({ ...pwForm, passwordConfirm: e.target.value })
