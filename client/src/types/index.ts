@@ -41,6 +41,7 @@ export interface Tour {
   category: string;
   location: TourLocation;
   featured?: boolean;
+
   hasUserReviewed?: boolean;
   distance?: number;
   distanceUnit?: string;
@@ -81,7 +82,6 @@ export interface ApiSingleResponse<T> {
   data: Record<string, T>;
 }
 
-/** Filter state for the tours page */
 export interface TourFilters {
   q: string;
   difficulty: string;
@@ -93,7 +93,6 @@ export interface TourFilters {
   sort: string;
 }
 
-/** Raw query params sent to the API */
 export interface TourQueryParams {
   q?: string;
   difficulty?: string;
@@ -105,4 +104,9 @@ export interface TourQueryParams {
   sort?: string;
   page?: number;
   limit?: number;
+
+  lat?: number;
+  lng?: number;
+
+  radius?: number;
 }
