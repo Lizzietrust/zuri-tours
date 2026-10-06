@@ -24,3 +24,41 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.leaflet-container {
+  font-family: inherit;
+
+  isolation: isolate;
+  z-index: 0;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+}
+
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.leaflet-popup-content a {
+  color: #047857; /* emerald-700 */
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.leaflet-popup-content a:hover {
+  text-decoration: underline;
+}
+
+/* Leaflet control buttons (zoom, attribution) — soften to match UI */
+.leaflet-control-zoom a {
+  border-radius: 6px;
+}
+
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 10px;
+}
