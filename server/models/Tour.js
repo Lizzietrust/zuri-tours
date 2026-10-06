@@ -488,6 +488,19 @@ tourSchema.virtual("hasLocation").get(function hasLocation() {
   );
 });
 
+/* NEW: Flat lat/lng accessors so the frontend `getTourCoords()`
+   helper can read them directly without unwrapping GeoJSON. */
+tourSchema.virtual("location.lat").get(function getLocationLat() {
+  const c = this.location?.coordinates;
+
+  return Array.isArray(c) && c.length === 2 ? c[1] : null;
+});
+tourSchema.virtual("location.lng").get(function getLocationLng() {
+  const c = this.location?.coordinates;
+
+  return Array.isArray(c) && c.length === 2 ? c[0] : null;
+});
+
 /* ------------------------ Helper: id compare ---------------------- */
 
 function idsEqual(a, b) {
@@ -1211,8 +1224,31 @@ tourSchema.pre("findById", function preFindByIdMiddleware() {
 
 tourSchema.pre("aggregate", function preAggregateMiddleware() {
   const pipeline = this.pipeline();
-  const shouldIncludeSecret = this._includeSecret || false;
+
+  if (!pipeline || pipeline.length === 0) return;
+
   const firstStage = pipeline[0];
+  const shouldIncludeSecret = this._includeSecret || false;
+  const shouldSkipActive = this._skipActiveFilter || false;
+  const shouldSkipSecret = this._skipSecretFilter || false;
+
+  if (firstStage && firstStage.$geoNear) {
+    if (!firstStage.$geoNear.query) firstStage.$geoNear.query = {};
+
+    if (!shouldSkipActive && firstStage.$geoNear.query.isActive === undefined) {
+      firstStage.$geoNear.query.isActive = true;
+    }
+    if (
+      !shouldIncludeSecret &&
+      !shouldSkipSecret &&
+      firstStage.$geoNear.query.isSecret === undefined
+    ) {
+      firstStage.$geoNear.query.isSecret = false;
+    }
+
+    return;
+  }
+
   const hasSecretFilter =
     firstStage &&
     firstStage.$match &&
@@ -1248,13 +1284,6 @@ tourSchema.post("aggregate", function postAggregateMiddleware(result) {
 
 /* ================================================================== */
 /*  INDEXES                                                           */
-/*                                                                    */
-/*  Design rules:                                                     */
-/*    1. A compound index covers its prefixes — never declare both.   */
-/*    2. Partial indexes on `isSecret: true` so secrets don't bloat.  */
-/*    3. Every index must serve a real query in the app.              */
-/*    4. `_id`, `slug`, `name`, `secretCode` are field-level unique   */
-/*       indexes — do NOT redeclare them here.                        */
 /* ================================================================== */
 
 /* #1 CORE — every Tour.find() via the pre-find hook */
@@ -1316,7 +1345,7 @@ tourSchema.index(
   { partialFilterExpression: { isSecret: true } },
 );
 
-/* #8 TEXT SEARCH — only one text index per collection */
+/* #8 TEXT SEARCH */
 tourSchema.index(
   { name: "text", summary: "text", description: "text" },
   {
@@ -1430,6 +1459,82 @@ tourSchema.statics.getGuidePerformanceSummary =
     ]);
   };
 
+tourSchema.statics.findNearby = async function findNearby({
+  lat,
+  lng,
+  radiusKm = 50,
+  filter = {},
+  page = 1,
+  limit = 20,
+  sortBy = "distance",
+} = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error("findNearby requires numeric lat and lng");
+  }
+
+  const maxDistance = Math.max(1, radiusKm) * 1000;
+  const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
+  const allowedSorts = ["distance", "price", "ratingsAverage", "duration"];
+  const sortKey = allowedSorts.includes(sortBy) ? sortBy : "distance";
+
+  const sortStage = {};
+
+  if (sortKey === "distance") {
+    sortStage.distance = 1;
+  } else if (sortKey === "price") {
+    sortStage.price = 1;
+  } else if (sortKey === "ratingsAverage") {
+    sortStage.ratingsAverage = -1;
+  } else if (sortKey === "duration") {
+    sortStage.duration = 1;
+  }
+
+  const basePipeline = [
+    {
+      $geoNear: {
+        near: { type: "Point", coordinates: [lng, lat] },
+        distanceField: "distance",
+        maxDistance,
+        spherical: true,
+        query: { isActive: true, isSecret: false, ...filter },
+      },
+    },
+    { $sort: sortStage },
+  ];
+
+  const countPipeline = [...basePipeline, { $count: "total" }];
+
+  const dataPipeline = [
+    ...basePipeline,
+    { $skip: skip },
+    { $limit: Math.max(1, limit) },
+  ];
+
+  const [countResult, tours] = await Promise.all([
+    this.aggregate(countPipeline),
+    this.aggregate(dataPipeline),
+  ]);
+
+  const total = countResult[0]?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / limit));
+
+  return {
+    tours,
+    total,
+    page,
+    pages,
+    center: { lat, lng },
+    radius: { value: radiusKm, unit: "km", meters: maxDistance },
+  };
+};
+
 const Tour = mongoose.models.Tour || mongoose.model("Tour", tourSchema);
+
+Tour.on("index", (err) => {
+  if (err) console.error("[Tour] index error:", err.message);
+});
+Tour.init().catch((err) => {
+  console.warn("[Tour] model init warning:", err.message);
+});
 
 export default Tour;
