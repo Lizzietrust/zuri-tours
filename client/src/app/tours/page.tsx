@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { useTours } from "@/hooks/useTours";
 import TourCard from "@/components/tours/TourCard";
 import TourFilters from "@/components/tours/TourFilters";
@@ -17,6 +18,9 @@ const DEFAULT_FILTERS: Filters = {
   category: "",
   sort: "-createdAt",
 };
+
+/** Stable empty array — reusing one instance avoids new references. */
+const EMPTY_TOURS: Tour[] = [];
 
 function TourCardSkeleton() {
   return (
@@ -162,7 +166,11 @@ export default function ToursPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
     useTours(queryParams);
 
-  const rawTours = (data?.data?.tours || []) as Tour[];
+  /* ---- FIXED: memoize rawTours so its reference is stable ---- */
+  const rawTours = useMemo<Tour[]>(
+    () => (data?.data?.tours ?? EMPTY_TOURS) as Tour[],
+    [data],
+  );
 
   // Apply client-side safety filter so the UI is always correct.
   const tours = useMemo(
@@ -192,7 +200,8 @@ export default function ToursPage() {
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
       {/* Header */}
-      <div className="mb-8 flex items-end justify-between gap-4">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        {/* Left: title + subtitle */}
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">
             All Tours
@@ -201,12 +210,22 @@ export default function ToursPage() {
             Handpicked adventures around the world
           </p>
         </div>
-        {!isLoading && !isError && tours.length > 0 && (
-          <span className="hidden text-sm text-gray-500 sm:inline">
-            {showingCount} of {serverCount}{" "}
-            {serverCount === 1 ? "tour" : "tours"}
-          </span>
-        )}
+
+        {/* Right: count + near-me button */}
+        <div className="flex items-center gap-3">
+          {!isLoading && !isError && tours.length > 0 && (
+            <span className="hidden text-sm text-gray-500 sm:inline">
+              {showingCount} of {serverCount}{" "}
+              {serverCount === 1 ? "tour" : "tours"}
+            </span>
+          )}
+          <Link
+            href="/tours/near-me"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+          >
+            📍 Near me
+          </Link>
+        </div>
       </div>
 
       {isError && (
