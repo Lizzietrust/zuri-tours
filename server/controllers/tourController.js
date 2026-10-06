@@ -4,7 +4,16 @@ import Review from "../models/Review.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
 import TourQueryService from "../services/tourQueryService.js";
-import geoService from "../services/geoService.js";
+import {
+  convertToMeters,
+  parseLatLng,
+  findToursWithinRadius,
+  aggregateToursWithinRadius,
+  distanceFromTourToPoint,
+  aggregateDistanceStats,
+  aggregateDistanceDistribution,
+  aggregateDistancesToTours,
+} from "../services/geoService.js";
 import {
   deleteOne,
   deleteMany,
@@ -283,6 +292,11 @@ const getAllToursFactory = getAll(Tour, {
       if (endDate) newFilter.startDates.$lte = new Date(endDate);
     }
 
+    delete newFilter.lat;
+    delete newFilter.lng;
+    delete newFilter.radius;
+    delete newFilter.unit;
+
     delete newFilter.minPrice;
     delete newFilter.maxPrice;
     delete newFilter.minRating;
@@ -395,10 +409,115 @@ const getAllToursFactory = getAll(Tour, {
 });
 
 /**
- * Wraps the factory-produced `getAllTours` so we can enrich the
- * response with a `hasUserReviewed` flag per tour.
+ * Shared: build the extra Mongo filter (difficulty, category, price)
+ * used by the geo branch.
  */
-const getAllTours = catchAsync((req, res, next) => {
+function buildGeoFilter(req) {
+  const filter = {};
+
+  if (req.query.difficulty) filter.difficulty = req.query.difficulty;
+  if (req.query.category) filter.category = req.query.category;
+
+  if (req.query.minPrice || req.query.maxPrice) {
+    filter.price = {};
+    if (req.query.minPrice) filter.price.$gte = Number(req.query.minPrice);
+    if (req.query.maxPrice) filter.price.$lte = Number(req.query.maxPrice);
+  }
+
+  if (req.query.minRating) {
+    filter.ratingsAverage = filter.ratingsAverage || {};
+    filter.ratingsAverage.$gte = Number(req.query.minRating);
+  }
+
+  if (req.query.maxDuration) {
+    filter.duration = { $lte: Number(req.query.maxDuration) };
+  }
+
+  return filter;
+}
+
+/** Validate and normalise geo params from the query string. */
+function parseGeoParams(req) {
+  const { lat, lng, radius = 50, unit = "km", sortBy = "distance" } = req.query;
+
+  if (lat === undefined || lng === undefined) return null;
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  const radiusNum = Number(radius);
+  const radiusKm = Number.isFinite(radiusNum) && radiusNum > 0 ? radiusNum : 50;
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    throw new AppError("Latitude and longitude must be valid numbers", 400);
+  }
+  if (latNum < -90 || latNum > 90) {
+    throw new AppError("Latitude must be between -90 and 90", 400);
+  }
+  if (lngNum < -180 || lngNum > 180) {
+    throw new AppError("Longitude must be between -180 and 180", 400);
+  }
+
+  const allowedSorts = ["distance", "price", "ratingsAverage", "duration"];
+  const sortKey = allowedSorts.includes(sortBy) ? sortBy : "distance";
+
+  return { lat: latNum, lng: lngNum, radiusKm, unit, sortBy: sortKey };
+}
+
+/**
+ * Wraps the factory-produced `getAllTours` so we can:
+ *   1. Enrich responses with `hasUserReviewed` per tour.
+ *   2. Short-circuit to the geo pipeline when `lat`+`lng` are supplied.
+ */
+const getAllTours = catchAsync(async (req, res, next) => {
+  /* ---------- GEO BRANCH ---------- */
+  const geo = parseGeoParams(req);
+
+  if (geo) {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit, 10) || 20),
+    );
+
+    const radiusMeters = convertToMeters(geo.radiusKm, geo.unit);
+    const filter = buildGeoFilter(req);
+
+    const result = await aggregateToursWithinRadius({
+      lng: geo.lng,
+      lat: geo.lat,
+      radiusMeters,
+      unit: geo.unit,
+      page,
+      limit,
+      filter,
+      sortBy: geo.sortBy,
+    });
+
+    let { tours } = result;
+
+    if (req.user) {
+      try {
+        tours = await attachUserReviewFlags(tours, req.user._id);
+      } catch (err) {
+        console.error("attachUserReviewFlags (geo) failed:", err.message);
+      }
+    }
+
+    return res.status(200).json({
+      status: "success",
+      results: tours.length,
+      total: result.total,
+      page: result.page,
+      pages: result.pages,
+      data: {
+        center: result.center,
+        radius: result.radius,
+        tours,
+      },
+    });
+  }
+
+  /* ---------- NON-GEO BRANCH (existing factory) ---------- */
   const originalJson = res.json.bind(res);
 
   res.json = async (payload) => {
@@ -1700,14 +1819,9 @@ const addGuideRating = catchAsync(async (req, res) => {
 });
 
 /* ============================================================
-   GEOSPATIAL HANDLERS — POINT QUERIES (existing)
+   GEOSPATIAL HANDLERS — POINT QUERIES
    ============================================================ */
 
-/**
- * GET /tours/within/:distance/center/:latlng/unit/:unit
- *
- * Classic radius query (uses `$near` + Node.js distance enrichment).
- */
 const getToursWithin = catchAsync(async (req, res, next) => {
   const { distance, latlng, unit } = req.params;
 
@@ -1720,8 +1834,8 @@ const getToursWithin = catchAsync(async (req, res, next) => {
     );
   }
 
-  const { lng, lat } = geoService.parseLatLng(latlng);
-  const radiusMeters = geoService.convertToMeters(distance, unit);
+  const { lng, lat } = parseLatLng(latlng);
+  const radiusMeters = convertToMeters(distance, unit);
 
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
@@ -1746,16 +1860,15 @@ const getToursWithin = catchAsync(async (req, res, next) => {
     filter.category = req.query.category;
   }
 
-  const { tours, total, center, radius } =
-    await geoService.findToursWithinRadius({
-      lng,
-      lat,
-      radiusMeters,
-      unit,
-      limit,
-      page,
-      filter,
-    });
+  const { tours, total, center, radius } = await findToursWithinRadius({
+    lng,
+    lat,
+    radiusMeters,
+    unit,
+    limit,
+    page,
+    filter,
+  });
 
   let finalTours = tours;
 
@@ -1820,11 +1933,6 @@ const getToursWithin = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * GET /tours/near?lat=&lng=&distance=&unit=
- *
- * Query-string variant.
- */
 const getToursNear = catchAsync(async (req, res, next) => {
   const {
     lat,
@@ -1856,7 +1964,7 @@ const getToursNear = catchAsync(async (req, res, next) => {
     return next(new AppError("Longitude must be between -180 and 180", 400));
   }
 
-  const radiusMeters = geoService.convertToMeters(distance, unit);
+  const radiusMeters = convertToMeters(distance, unit);
 
   const parsedPage = Math.max(1, parseInt(page, 10) || 1);
   const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
@@ -1872,16 +1980,15 @@ const getToursNear = catchAsync(async (req, res, next) => {
     if (req.query.maxPrice) filter.price.$lte = Number(req.query.maxPrice);
   }
 
-  const { tours, total, center, radius } =
-    await geoService.findToursWithinRadius({
-      lng: lngNum,
-      lat: latNum,
-      radiusMeters,
-      unit,
-      limit: parsedLimit,
-      page: parsedPage,
-      filter,
-    });
+  const { tours, total, center, radius } = await findToursWithinRadius({
+    lng: lngNum,
+    lat: latNum,
+    radiusMeters,
+    unit,
+    limit: parsedLimit,
+    page: parsedPage,
+    filter,
+  });
 
   res.status(200).json({
     status: "success",
@@ -1897,9 +2004,6 @@ const getToursNear = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * GET /tours/:id/distance-to/:latlng/unit/:unit
- */
 const getDistanceFromTour = catchAsync(async (req, res, next) => {
   const { id, latlng, unit } = req.params;
 
@@ -1909,9 +2013,9 @@ const getDistanceFromTour = catchAsync(async (req, res, next) => {
     );
   }
 
-  const { lng, lat } = geoService.parseLatLng(latlng);
+  const { lng, lat } = parseLatLng(latlng);
 
-  const result = await geoService.distanceFromTourToPoint(id, lng, lat, unit);
+  const result = await distanceFromTourToPoint(id, lng, lat, unit);
 
   res.status(200).json({
     status: "success",
@@ -1923,12 +2027,6 @@ const getDistanceFromTour = catchAsync(async (req, res, next) => {
    GEOSPATIAL AGGREGATION HANDLERS — $geoNear PIPELINES
    ============================================================ */
 
-/**
- * GET /tours/near-aggregate
- * Query: lat, lng, distance=50, unit=km, page, limit,
- *        sortBy=distance|price|ratingsAverage, difficulty, category,
- *        minPrice, maxPrice
- */
 const getToursNearAggregate = catchAsync(async (req, res, next) => {
   const {
     lat,
@@ -1972,7 +2070,7 @@ const getToursNearAggregate = catchAsync(async (req, res, next) => {
     );
   }
 
-  const radiusMeters = geoService.convertToMeters(distance, unit);
+  const radiusMeters = convertToMeters(distance, unit);
 
   const filter = {};
 
@@ -1988,7 +2086,7 @@ const getToursNearAggregate = catchAsync(async (req, res, next) => {
   const parsedPage = Math.max(1, parseInt(page, 10) || 1);
   const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
-  const result = await geoService.aggregateToursWithinRadius({
+  const result = await aggregateToursWithinRadius({
     lng: lngNum,
     lat: latNum,
     radiusMeters,
@@ -2013,10 +2111,6 @@ const getToursNearAggregate = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * GET /tours/distance-stats
- * Query: lat, lng, distance=500, unit=km, groupBy=difficulty|category|featured
- */
 const getDistanceStats = catchAsync(async (req, res, next) => {
   const { lat, lng, distance = 500, unit = "km", groupBy } = req.query;
 
@@ -2046,9 +2140,9 @@ const getDistanceStats = catchAsync(async (req, res, next) => {
     );
   }
 
-  const radiusMeters = geoService.convertToMeters(distance, unit);
+  const radiusMeters = convertToMeters(distance, unit);
 
-  const result = await geoService.aggregateDistanceStats({
+  const result = await aggregateDistanceStats({
     lng: lngNum,
     lat: latNum,
     radiusMeters,
@@ -2062,10 +2156,6 @@ const getDistanceStats = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * GET /tours/distance-distribution
- * Query: lat, lng, distance=500, unit=km, buckets=5
- */
 const getDistanceDistribution = catchAsync(async (req, res, next) => {
   const { lat, lng, distance = 500, unit = "km", buckets = 5 } = req.query;
 
@@ -2084,9 +2174,9 @@ const getDistanceDistribution = catchAsync(async (req, res, next) => {
 
   const parsedBuckets = Math.min(20, Math.max(2, parseInt(buckets, 10) || 5));
 
-  const radiusMeters = geoService.convertToMeters(distance, unit);
+  const radiusMeters = convertToMeters(distance, unit);
 
-  const result = await geoService.aggregateDistanceDistribution({
+  const result = await aggregateDistanceDistribution({
     lng: lngNum,
     lat: latNum,
     radiusMeters,
@@ -2100,10 +2190,6 @@ const getDistanceDistribution = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * POST /tours/batch-distance
- * Body: { tourIds: [...], lat, lng, unit }
- */
 const getBatchDistances = catchAsync(async (req, res, next) => {
   const { tourIds, lat, lng, unit = "km" } = req.body;
 
@@ -2149,7 +2235,7 @@ const getBatchDistances = catchAsync(async (req, res, next) => {
     );
   }
 
-  const result = await geoService.aggregateDistancesToTours({
+  const result = await aggregateDistancesToTours({
     lng: lngNum,
     lat: latNum,
     tourIds,
@@ -2193,11 +2279,9 @@ export {
   setLeadGuide,
   getGuideDetails,
   addGuideRating,
-  // geospatial point queries
   getToursWithin,
   getToursNear,
   getDistanceFromTour,
-  // geospatial aggregation
   getToursNearAggregate,
   getDistanceStats,
   getDistanceDistribution,
