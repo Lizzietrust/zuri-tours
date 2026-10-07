@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTours } from "@/hooks/useTours";
 import TourCard from "@/components/tours/TourCard";
+import TourCardSkeleton from "@/components/tours/TourCardSkeleton";
 import TourFilters from "@/components/tours/TourFilters";
 import ActiveFilterChips from "@/components/tours/ActiveFilterChips";
 import type { Tour, TourFilters as Filters, TourQueryParams } from "@/types";
@@ -19,56 +20,8 @@ const DEFAULT_FILTERS: Filters = {
   sort: "-createdAt",
 };
 
-/** Stable empty array — reusing one instance avoids new references. */
 const EMPTY_TOURS: Tour[] = [];
 
-function TourCardSkeleton() {
-  return (
-    <div className="animate-pulse overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-      <div className="aspect-4/3 w-full bg-gray-200" />
-      <div className="space-y-3 p-4">
-        <div className="h-3 w-2/3 rounded bg-gray-200" />
-        <div className="h-3 w-full rounded bg-gray-200" />
-        <div className="h-3 w-4/5 rounded bg-gray-200" />
-        <div className="flex items-center justify-between pt-2">
-          <div className="h-5 w-16 rounded bg-gray-200" />
-          <div className="h-6 w-20 rounded bg-gray-200" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ErrorBanner({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="flex flex-col items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
-          !
-        </span>
-        <div>
-          <p className="font-medium text-red-800">Couldn&apos;t load tours</p>
-          <p className="text-sm text-red-600">{message}</p>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
-      >
-        Try again
-      </button>
-    </div>
-  );
-}
-
-/** Convert UI filter state → API query params */
 function toQueryParams(filters: Filters): TourQueryParams {
   const params: TourQueryParams = { sort: filters.sort };
 
@@ -76,35 +29,26 @@ function toQueryParams(filters: Filters): TourQueryParams {
   if (filters.difficulty) params.difficulty = filters.difficulty;
   if (filters.category) params.category = filters.category;
 
-  const min = Number(filters.minPrice);
-  const max = Number(filters.maxPrice);
-  if (filters.minPrice !== "" && Number.isFinite(min)) params.minPrice = min;
-  if (filters.maxPrice !== "" && Number.isFinite(max)) params.maxPrice = max;
-
-  const rating = Number(filters.minRating);
-  if (filters.minRating !== "" && Number.isFinite(rating)) {
-    params.minRating = rating;
+  if (filters.minPrice !== "") {
+    const n = Number(filters.minPrice);
+    if (Number.isFinite(n)) params.minPrice = n;
   }
-
-  const dur = Number(filters.maxDuration);
-  if (filters.maxDuration !== "" && Number.isFinite(dur) && dur > 0) {
-    params.maxDuration = dur;
+  if (filters.maxPrice !== "") {
+    const n = Number(filters.maxPrice);
+    if (Number.isFinite(n)) params.maxPrice = n;
+  }
+  if (filters.minRating !== "") {
+    const n = Number(filters.minRating);
+    if (Number.isFinite(n)) params.minRating = n;
+  }
+  if (filters.maxDuration !== "") {
+    const n = Number(filters.maxDuration);
+    if (Number.isFinite(n) && n > 0) params.maxDuration = n;
   }
 
   return params;
 }
 
-/**
- * Client-side safety filter.
- *
- * The backend may not yet support every filter (e.g. `maxDuration` or
- * `minRating`) — this ensures the UI always respects the user's intent,
- * even when the API ignores a param. It also lets us search on fields
- * the backend's `q` might miss (e.g. location.city).
- *
- * If your backend eventually handles everything perfectly, you can
- * delete this and rely solely on server filtering.
- */
 function applyClientFilters(tours: Tour[], filters: Filters): Tour[] {
   return tours.filter((tour) => {
     if (filters.q.trim()) {
@@ -125,54 +69,72 @@ function applyClientFilters(tours: Tour[], filters: Filters): Tour[] {
       if (!haystack.includes(needle)) return false;
     }
 
-    if (filters.difficulty && tour.difficulty !== filters.difficulty) {
+    if (filters.difficulty && tour.difficulty !== filters.difficulty)
       return false;
-    }
-
-    if (filters.category && tour.category !== filters.category) {
-      return false;
-    }
+    if (filters.category && tour.category !== filters.category) return false;
 
     if (filters.minPrice !== "") {
-      const min = Number(filters.minPrice);
-      if (Number.isFinite(min) && tour.price < min) return false;
+      const n = Number(filters.minPrice);
+      if (Number.isFinite(n) && tour.price < n) return false;
     }
-
     if (filters.maxPrice !== "") {
-      const max = Number(filters.maxPrice);
-      if (Number.isFinite(max) && tour.price > max) return false;
+      const n = Number(filters.maxPrice);
+      if (Number.isFinite(n) && tour.price > n) return false;
     }
-
     if (filters.minRating !== "") {
-      const min = Number(filters.minRating);
-      if (Number.isFinite(min) && (tour.ratingsAverage ?? 0) < min)
-        return false;
+      const n = Number(filters.minRating);
+      if (Number.isFinite(n) && (tour.ratingsAverage ?? 0) < n) return false;
     }
-
     if (filters.maxDuration !== "") {
-      const max = Number(filters.maxDuration);
-      if (Number.isFinite(max) && tour.duration > max) return false;
+      const n = Number(filters.maxDuration);
+      if (Number.isFinite(n) && tour.duration > n) return false;
     }
 
     return true;
   });
 }
 
+function ErrorBanner({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 font-bold text-red-600">
+          !
+        </span>
+        <div>
+          <p className="font-medium text-red-800">Couldn&apos;t load tours</p>
+          <p className="text-sm text-red-600">{message}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 export default function ToursPage() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
   const queryParams = useMemo(() => toQueryParams(filters), [filters]);
-
   const { data, isLoading, isError, error, refetch, isFetching } =
     useTours(queryParams);
 
-  /* ---- FIXED: memoize rawTours so its reference is stable ---- */
   const rawTours = useMemo<Tour[]>(
     () => (data?.data?.tours ?? EMPTY_TOURS) as Tour[],
     [data],
   );
 
-  // Apply client-side safety filter so the UI is always correct.
   const tours = useMemo(
     () => applyClientFilters(rawTours, filters),
     [rawTours, filters],
@@ -182,12 +144,10 @@ export default function ToursPage() {
     (error as { message?: string } | null)?.message ||
     "An unexpected error occurred.";
 
-  const handleReset = useCallback(() => {
-    setFilters(DEFAULT_FILTERS);
-  }, []);
+  const handleReset = useCallback(() => setFilters(DEFAULT_FILTERS), []);
 
-  const serverCount = data?.total ?? rawTours.length;
-  const showingCount = tours.length;
+  const serverTotal = data?.total ?? rawTours.length;
+  const showingOnPage = tours.length;
   const isFiltered =
     filters.q !== "" ||
     filters.difficulty !== "" ||
@@ -201,9 +161,8 @@ export default function ToursPage() {
     <div className="mx-auto max-w-7xl px-6 py-12">
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        {/* Left: title + subtitle */}
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
             All Tours
           </h1>
           <p className="mt-1 text-sm text-gray-500">
@@ -211,12 +170,10 @@ export default function ToursPage() {
           </p>
         </div>
 
-        {/* Right: count + near-me button */}
         <div className="flex items-center gap-3">
           {!isLoading && !isError && tours.length > 0 && (
             <span className="hidden text-sm text-gray-500 sm:inline">
-              {showingCount} of {serverCount}{" "}
-              {serverCount === 1 ? "tour" : "tours"}
+              {showingOnPage} on this page · {serverTotal} total
             </span>
           )}
           <Link
@@ -234,16 +191,13 @@ export default function ToursPage() {
         </div>
       )}
 
-      {/* Two-column layout: filters + results */}
       <div className="lg:grid lg:grid-cols-[280px_1fr] lg:gap-8">
-        {/* Sidebar */}
         <TourFilters
           filters={filters}
           onChange={setFilters}
           onReset={handleReset}
         />
 
-        {/* Results */}
         <div className="mt-6 lg:mt-0">
           <ActiveFilterChips
             filters={filters}
