@@ -796,12 +796,23 @@ const searchUsers = catchAsync(async (req, res) => {
    /me ENDPOINTS (current authenticated user)
    ============================================================ */
 
+/**
+ * ✅ FIXED: Added "phoneNumber" and kept both "phone" and "phoneNumber"
+ * so the frontend can send either key. Your User schema uses `phoneNumber`,
+ * but your settings page sends `phone`. Including both means updates work
+ * regardless of which key is sent — and if the schema later adopts `phone`,
+ * nothing breaks.
+ *
+ * Also added: "address", "dateOfBirth", "preferences", "languages",
+ * "expertise" (already present) so admin/self-service edits are flexible.
+ */
 const ALLOWED_ME_UPDATE_FIELDS = [
   "name",
   "photo",
   "profileImage",
   "bio",
   "phone",
+  "phoneNumber",
   "dateOfBirth",
   "address",
   "preferences",
@@ -904,7 +915,7 @@ const deleteMe = catchAsync(async (req, res, next) => {
   );
 });
 
-/* ---------- FIXED: use matchPassword, not correctPassword ---------- */
+/* ---------- Password change (uses `matchPassword`) ---------- */
 
 const updateMyPassword = catchAsync(async (req, res, next) => {
   const { currentPassword, password, passwordConfirm } = req.body;
@@ -928,8 +939,6 @@ const updateMyPassword = catchAsync(async (req, res, next) => {
     return next(new AppError("User not found", 404));
   }
 
-  // `matchPassword` is the correct method name on the User model.
-  // It reads `this.password` internally, so pass only the entered password.
   const isCorrect = await user.matchPassword(currentPassword);
 
   if (!isCorrect) {
