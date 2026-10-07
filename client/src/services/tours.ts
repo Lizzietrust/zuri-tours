@@ -1,50 +1,123 @@
+import { api } from "@/lib/api";
 import type { Tour, TourQueryParams } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL;
-
 const API_ORIGIN =
-  process.env.NEXT_PUBLIC_API_ORIGIN || API_URL?.replace(/\/api\/v\d+\/?$/, "");
+  process.env.NEXT_PUBLIC_API_ORIGIN ??
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v\d+\/?$/, "");
 
 export const imageUrl = (filename?: string) => {
   if (!filename) return "/placeholder-tour.jpg";
+  if (filename === "default.jpg") return "/placeholder-tour.jpg";
   if (filename.startsWith("http")) return filename;
   return `${API_ORIGIN}/img/tours/${filename}`;
 };
 
-type ApiListResponse = {
+type BackendListResponse = {
   status: string;
   results?: number;
   total?: number;
   page?: number;
   pages?: number;
-  data: { tours: Tour[] };
+  limit?: number;
+  data: { tours: Tour[] } | Tour[];
 };
 
-type RawSingleResponse = {
+type BackendSingleResponse = {
   status: string;
   message?: string;
   data: Tour | { tour?: Tour; document?: Tour } | null;
 };
 
-export type ApiSingleResponse = {
+export type TourListResult = {
+  status: string;
+  results: number;
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+  data: { tours: Tour[] };
+};
+
+export type TourSingleResult = {
   status: string;
   data: { tour: Tour };
 };
 
-async function handle<T>(res: Response): Promise<T> {
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message =
-      (json as { message?: string })?.message ||
-      `Request failed with status ${res.status}`;
-    throw new Error(message);
-  }
-  return json as T;
+function extractTours(raw: BackendListResponse): Tour[] {
+  if (Array.isArray(raw.data)) return raw.data;
+  if (raw.data && Array.isArray(raw.data.tours)) return raw.data.tours;
+  return [];
 }
 
-/**
- * Build a query string from filter params, skipping empty values.
- */
+function extractTour(raw: BackendSingleResponse | null): Tour | null {
+  if (!raw || !raw.data) return null;
+
+  const d = raw.data as unknown;
+
+  if (typeof d === "object" && d && "_id" in d && "name" in d) {
+    return d as Tour;
+  }
+  if (typeof d === "object" && d && "tour" in d) {
+    const t = (d as { tour?: Tour }).tour;
+    if (t && "_id" in t) return t;
+  }
+  if (typeof d === "object" && d && "document" in d) {
+    const doc = (d as { document?: Tour }).document;
+    if (doc && "_id" in doc) return doc;
+  }
+  return null;
+}
+
+export const tourService = {
+  async getAll(params: TourQueryParams = {}): Promise<TourListResult> {
+    const { data } = await api.get<BackendListResponse>("/tours", { params });
+
+    const tours = extractTours(data);
+
+    return {
+      status: data.status,
+      results: data.results ?? tours.length,
+      total: data.total ?? tours.length,
+      page: data.page ?? 1,
+      pages: data.pages ?? 1,
+      limit: data.limit ?? tours.length,
+      data: { tours },
+    };
+  },
+
+  async getFeatured(limit = 3): Promise<Tour[]> {
+    const { data } = await api.get<BackendListResponse>("/tours", {
+      params: { limit, sort: "-ratingsAverage" },
+    });
+    return extractTours(data);
+  },
+
+  async getBySlug(slug: string): Promise<TourSingleResult> {
+    const { data } = await api.get<BackendSingleResponse>(
+      `/tours/${encodeURIComponent(slug)}`,
+    );
+    const tour = extractTour(data);
+    if (!tour) throw new Error("Tour data missing in response");
+    return { status: data.status, data: { tour } };
+  },
+
+  /** Server-side fetch for generateMetadata. */
+  async getBySlugServer(slug: string, revalidate = 300): Promise<Tour | null> {
+    const url = `${process.env.NEXT_PUBLIC_API_URL}/tours/${encodeURIComponent(
+      slug,
+    )}?populateReviews=false`;
+    try {
+      const res = await fetch(url, { next: { revalidate } });
+      if (!res.ok) return null;
+      const raw = (await res.json()) as BackendSingleResponse;
+      return extractTour(raw);
+    } catch {
+      return null;
+    }
+  },
+};
+
+/** Build a query string — kept for server-side usage. */
 export function buildTourQueryString(params: TourQueryParams = {}): string {
   const search = new URLSearchParams();
 
@@ -52,95 +125,24 @@ export function buildTourQueryString(params: TourQueryParams = {}): string {
   if (params.difficulty) search.set("difficulty", params.difficulty);
   if (params.category) search.set("category", params.category);
 
-  if (params.minPrice !== undefined && params.minPrice !== null) {
+  if (params.minPrice !== undefined)
     search.set("minPrice", String(params.minPrice));
-  }
-  if (params.maxPrice !== undefined && params.maxPrice !== null) {
+  if (params.maxPrice !== undefined)
     search.set("maxPrice", String(params.maxPrice));
-  }
-  if (params.minRating !== undefined && params.minRating !== null) {
+  if (params.minRating !== undefined)
     search.set("minRating", String(params.minRating));
-  }
-  if (params.maxDuration !== undefined && params.maxDuration !== null) {
+  if (params.maxDuration !== undefined)
     search.set("maxDuration", String(params.maxDuration));
-  }
 
   if (params.sort) search.set("sort", params.sort);
   if (params.page) search.set("page", String(params.page));
   if (params.limit) search.set("limit", String(params.limit));
+  if (params.lat !== undefined) search.set("lat", String(params.lat));
+  if (params.lng !== undefined) search.set("lng", String(params.lng));
+  if (params.radius !== undefined) search.set("radius", String(params.radius));
+  if (params.unit) search.set("unit", params.unit);
+  if (params.sortBy) search.set("sortBy", params.sortBy);
 
   const qs = search.toString();
   return qs ? `?${qs}` : "";
 }
-
-function extractTour(raw: RawSingleResponse | null | undefined): Tour | null {
-  if (!raw || !raw.data) return null;
-
-  const d = raw.data as unknown;
-
-  if (
-    d &&
-    typeof d === "object" &&
-    "_id" in (d as object) &&
-    "name" in (d as object)
-  ) {
-    return d as Tour;
-  }
-
-  if (d && typeof d === "object" && "tour" in (d as object)) {
-    const t = (d as { tour?: Tour }).tour;
-    if (t && "_id" in t) return t;
-  }
-
-  if (d && typeof d === "object" && "document" in (d as object)) {
-    const doc = (d as { document?: Tour }).document;
-    if (doc && "_id" in doc) return doc;
-  }
-
-  return null;
-}
-
-export const tourService = {
-  /**
-   * List tours with optional search & filters.
-   * Sends both the structured params AND forwards them for the backend to use.
-   */
-  async getAll(params: TourQueryParams = {}): Promise<ApiListResponse> {
-    const queryString = buildTourQueryString(params);
-    const res = await fetch(`${API_URL}/tours${queryString}`, {
-      headers: { Accept: "application/json" },
-    });
-    return handle<ApiListResponse>(res);
-  },
-
-  /** Fetch a single tour by slug or id */
-  async getBySlug(slug: string): Promise<ApiSingleResponse> {
-    const res = await fetch(
-      `${API_URL}/tours/${encodeURIComponent(slug)}?populateReviews=false`,
-      { headers: { Accept: "application/json" } },
-    );
-
-    const raw = await handle<RawSingleResponse>(res);
-    const tour = extractTour(raw);
-
-    if (!tour) {
-      throw new Error("Tour data missing in response");
-    }
-
-    return { status: raw.status, data: { tour } };
-  },
-
-  /** Server-side fetch used ONLY for generateMetadata */
-  async getBySlugServer(slug: string, revalidate = 300): Promise<Tour | null> {
-    const url = `${API_URL}/tours/${encodeURIComponent(slug)}?populateReviews=false`;
-    try {
-      const res = await fetch(url, { next: { revalidate } });
-      if (!res.ok) return null;
-
-      const raw = (await res.json()) as RawSingleResponse;
-      return extractTour(raw);
-    } catch {
-      return null;
-    }
-  },
-};
