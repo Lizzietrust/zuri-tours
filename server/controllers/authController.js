@@ -8,6 +8,15 @@ import {
 } from "../utils/responseHelper.js";
 import { Email } from "../utils/email.js";
 
+const ALLOWED_SELF_UPDATE_FIELDS = [
+  "name",
+  "photo",
+  "profileImage",
+  "bio",
+  "phone",
+  "phoneNumber",
+];
+
 export const register = catchAsync(async (req, res) => {
   const { name, email, password, passwordConfirm, photo } = req.body;
 
@@ -45,6 +54,10 @@ export const register = catchAsync(async (req, res) => {
     token,
   });
 });
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
 
 export const login = catchAsync(async (req, res) => {
   const { email, password } = req.body;
@@ -99,6 +112,7 @@ export const login = catchAsync(async (req, res) => {
     ),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   };
 
   res.cookie("token", token, cookieOptions);
@@ -113,13 +127,30 @@ export const login = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   GET ME
+   ============================================================ */
+
 export const getMe = catchAsync(async (req, res) => {
   const user = await User.findById(req.user.id)
-    .select("-password")
-    .select("+lastLogin");
+    .select(
+      "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire",
+    )
+    .select("+lastLogin")
+    .lean();
 
-  sendSuccessResponse(res, 200, "User profile fetched successfully", user);
+  if (!user) {
+    return sendUnauthorizedResponse(res, "User not found");
+  }
+
+  sendSuccessResponse(res, 200, "User profile fetched successfully", {
+    user,
+  });
 });
+
+/* ============================================================
+   UPDATE ME (profile)
+   ============================================================ */
 
 export const updateMe = catchAsync(async (req, res) => {
   if (req.body.password || req.body.passwordConfirm) {
@@ -129,24 +160,25 @@ export const updateMe = catchAsync(async (req, res) => {
     );
   }
 
-  const allowedFields = ["name", "email", "photo"];
+  if (req.body.role) {
+    return sendValidationErrorResponse(res, "You cannot change your own role");
+  }
+
   const filteredBody = {};
 
   Object.keys(req.body).forEach((key) => {
-    if (allowedFields.includes(key)) {
+    if (ALLOWED_SELF_UPDATE_FIELDS.includes(key)) {
       filteredBody[key] = req.body[key];
     }
   });
 
-  if (filteredBody.email) {
-    const existingUser = await User.findOne({
-      email: filteredBody.email,
-      _id: { $ne: req.user.id },
-    });
-
-    if (existingUser) {
-      return sendValidationErrorResponse(res, "Email already in use");
-    }
+  if (Object.keys(filteredBody).length === 0) {
+    return sendValidationErrorResponse(
+      res,
+      `No valid fields provided. Allowed fields: ${ALLOWED_SELF_UPDATE_FIELDS.join(
+        ", ",
+      )}`,
+    );
   }
 
   const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
@@ -154,22 +186,40 @@ export const updateMe = catchAsync(async (req, res) => {
     runValidators: true,
   }).select("-password");
 
-  sendSuccessResponse(res, 200, "Profile updated successfully", updatedUser);
+  if (!updatedUser) {
+    return sendUnauthorizedResponse(res, "User not found");
+  }
+
+  sendSuccessResponse(res, 200, "Profile updated successfully", {
+    user: updatedUser,
+  });
 });
 
-export const updatePassword = catchAsync(async (req, res) => {
-  const { currentPassword, newPassword, newPasswordConfirm } = req.body;
+/* ============================================================
+   UPDATE PASSWORD (while logged in)
+   ============================================================ */
 
-  if (!currentPassword || !newPassword || !newPasswordConfirm) {
+export const updatePassword = catchAsync(async (req, res) => {
+  const { currentPassword, password, passwordConfirm } = req.body;
+
+  if (!currentPassword || !password || !passwordConfirm) {
     return sendValidationErrorResponse(
       res,
       "Please provide current password, new password, and confirm password",
     );
   }
 
+  if (password !== passwordConfirm) {
+    return sendValidationErrorResponse(res, "Passwords do not match");
+  }
+
   const user = await User.findById(req.user.id).select(
     "+password +passwordChangedAt +tokenVersion",
   );
+
+  if (!user) {
+    return sendUnauthorizedResponse(res, "User not found");
+  }
 
   const isPasswordMatch = await user.matchPassword(currentPassword);
 
@@ -177,8 +227,9 @@ export const updatePassword = catchAsync(async (req, res) => {
     return sendValidationErrorResponse(res, "Current password is incorrect");
   }
 
-  user.password = newPassword;
-  user.passwordConfirm = newPasswordConfirm;
+  user.password = password;
+  user.passwordConfirm = passwordConfirm;
+
   await user.save();
 
   const token = user.getSignedJwtToken();
@@ -192,6 +243,10 @@ export const updatePassword = catchAsync(async (req, res) => {
     token,
   });
 });
+
+/* ============================================================
+   FORGOT PASSWORD
+   ============================================================ */
 
 export const forgotPassword = catchAsync(async (req, res) => {
   const { email } = req.body;
@@ -221,9 +276,6 @@ export const forgotPassword = catchAsync(async (req, res) => {
   await user.save({ validateBeforeSave: false });
 
   try {
-    // Send the user to the CLIENT reset page, not the API endpoint.
-    // The client will read the token from the URL and call
-    // PUT /api/v1/auth/resetpassword/:token with the new password.
     const clientUrl =
       process.env.CLIENT_URL?.split(",")[0]?.trim() || "http://localhost:3002";
 
@@ -249,6 +301,10 @@ export const forgotPassword = catchAsync(async (req, res) => {
     );
   }
 });
+
+/* ============================================================
+   RESET PASSWORD (from email link)
+   ============================================================ */
 
 export const resetPassword = catchAsync(async (req, res) => {
   const hashedToken = crypto
@@ -301,29 +357,34 @@ export const resetPassword = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   LOGOUT
+   ============================================================ */
+
 export const logout = catchAsync((req, res) => {
   res.cookie("token", "none", {
     expires: new Date(Date.now() + 10 * 1000),
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
 
   sendSuccessResponse(res, 200, "Logged out successfully");
 });
 
+/* ============================================================
+   INVALIDATE ALL SESSIONS
+   ============================================================ */
+
 export const invalidateAllSessions = catchAsync(async (req, res) => {
   const user = await User.findById(req.user.id);
+
+  if (!user) {
+    return sendUnauthorizedResponse(res, "User not found");
+  }
 
   user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save({ validateBeforeSave: false });
 
   sendSuccessResponse(res, 200, "All sessions invalidated successfully");
-});
-
-export const deleteMe = catchAsync(async (req, res) => {
-  await User.findByIdAndUpdate(req.user.id, { active: false });
-
-  res.status(204).json({
-    status: "success",
-    data: null,
-  });
 });
