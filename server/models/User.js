@@ -3,6 +3,10 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import validator from "validator";
 
+/* ============================================================
+   VALIDATORS
+   ============================================================ */
+
 function validateNameLength(value) {
   return validator.isLength(value, { min: 2, max: 50 });
 }
@@ -24,6 +28,10 @@ function validatePasswordStrength(value) {
 function getEmailErrorMessage(props) {
   return `${props.value} is not a valid email address!`;
 }
+
+/* ============================================================
+   SANITIZERS
+   ============================================================ */
 
 function sanitizeString(value) {
   if (typeof value !== "string") {
@@ -102,9 +110,20 @@ function sanitizeArray(arr) {
   });
 }
 
+/**
+ * Sanitize user-controlled fields before validation runs.
+ * Note: `email` is sanitized but not stripped of its `@`, `.` etc.
+ * because `sanitizeString` only removes dangerous chars, not all
+ * non-alphanumerics. The `validator.isEmail` check afterwards still
+ * enforces a valid email shape.
+ */
 function sanitizeDocument(doc) {
   if (doc.name) {
     doc.name = sanitizeString(doc.name);
+  }
+
+  if (doc.email) {
+    doc.email = sanitizeString(doc.email);
   }
 
   if (doc.bio) {
@@ -151,6 +170,10 @@ function sanitizeDocument(doc) {
     }
   }
 }
+
+/* ============================================================
+   SCHEMA
+   ============================================================ */
 
 const userSchema = new mongoose.Schema(
   {
@@ -200,10 +223,7 @@ const userSchema = new mongoose.Schema(
     },
     resetPasswordToken: String,
     resetPasswordExpire: Date,
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
+
     passwordChangedAt: {
       type: Date,
       select: false,
@@ -236,6 +256,35 @@ const userSchema = new mongoose.Schema(
       default: [],
       select: false,
     },
+
+    /* ---------------- Soft-delete / audit trail ---------------- */
+
+    accountDeleted: {
+      type: Boolean,
+      default: false,
+      select: false,
+    },
+    accountDeletedAt: {
+      type: Date,
+      select: false,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      select: false,
+    },
+    deletedAt: {
+      type: Date,
+      select: false,
+    },
+    deletedBy: {
+      type: mongoose.Schema.ObjectId,
+      ref: "User",
+      select: false,
+    },
+
+    /* ---------------- Domain data ---------------- */
+
     assignedTours: [
       {
         type: mongoose.Schema.ObjectId,
@@ -307,9 +356,9 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-/* ------------------------------------------------------------------ */
-/*  passwordConfirm virtual                                           */
-/* ------------------------------------------------------------------ */
+/* ============================================================
+   VIRTUALS
+   ============================================================ */
 
 function getPasswordConfirm() {
   return this._passwordConfirm;
@@ -323,6 +372,10 @@ userSchema
   .virtual("passwordConfirm")
   .get(getPasswordConfirm)
   .set(setPasswordConfirm);
+
+/* ============================================================
+   MIDDLEWARE
+   ============================================================ */
 
 userSchema.pre("validate", function sanitizeBeforeValidate() {
   sanitizeDocument(this);
@@ -344,11 +397,13 @@ userSchema.pre("save", async function hashPasswordMiddleware() {
   this.password = await bcrypt.hash(this.password, salt);
   this.passwordChangedAt = new Date();
   this.tokenVersion = (this.tokenVersion || 0) + 1;
-  this.active = true;
 });
 
 userSchema.pre(/^find/, function filterActiveUsersMiddleware() {
-  this.find({ active: { $ne: false } });
+  this.find({
+    active: { $ne: false },
+    accountDeleted: { $ne: true },
+  });
 });
 
 function changedPasswordAfter(JWTTimestamp) {
@@ -458,9 +513,9 @@ userSchema.methods.canManageGuides = canManageGuides;
 userSchema.methods.canAssignTours = canAssignTours;
 userSchema.methods.hasTourAccess = hasTourAccess;
 
-/* ------------------------------------------------------------------ */
-/*  Statics                                                           */
-/* ------------------------------------------------------------------ */
+/* ============================================================
+   STATICS
+   ============================================================ */
 
 async function findAndVerifyUser(id) {
   const user = await this.findById(id)
@@ -482,15 +537,23 @@ async function findAndVerifyUser(id) {
 
 userSchema.statics.findAndVerifyUser = findAndVerifyUser;
 
-/* ------------------------------------------------------------------ */
-/*  Indexes                                                           */
-/* ------------------------------------------------------------------ */
+function findDeleted(filter = {}) {
+  return this.find({
+    ...filter,
+    $or: [{ accountDeleted: true }, { active: false }],
+  }).setOptions({ includeDeleted: true });
+}
+
+userSchema.statics.findDeleted = findDeleted;
 
 userSchema.index({ active: 1 });
 userSchema.index({ tokenVersion: 1 });
 userSchema.index({ lockUntil: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ assignedTours: 1 });
+
+userSchema.index({ accountDeleted: 1 });
+userSchema.index({ deletedAt: 1 });
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 
