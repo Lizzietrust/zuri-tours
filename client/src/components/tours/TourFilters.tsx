@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TourFilters as Filters } from "@/types";
 
 interface TourFiltersProps {
@@ -38,40 +38,50 @@ export default function TourFilters({
   onChange,
   onReset,
 }: TourFiltersProps) {
-  // Local debounced state for text/number inputs
   const [local, setLocal] = useState<Filters>(filters);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Sync external → local (e.g. when URL changes or reset is clicked)
+  const lastExternal = useRef(JSON.stringify(filters));
+
   useEffect(() => {
-    setLocal(filters);
+    const serialized = JSON.stringify(filters);
+    if (serialized !== lastExternal.current) {
+      lastExternal.current = serialized;
+      setLocal(filters);
+    }
   }, [filters]);
 
-  // Debounce the search/price/duration inputs
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const changed =
-        local.q !== filters.q ||
-        local.minPrice !== filters.minPrice ||
-        local.maxPrice !== filters.maxPrice ||
-        local.maxDuration !== filters.maxDuration;
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-      if (changed) onChange(local);
-    }, 400);
-
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [local.q, local.minPrice, local.maxPrice, local.maxDuration]);
-
-  // Immediate for selects
-  const handleSelect = useCallback(
-    (key: keyof Filters) => (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const next = { ...local, [key]: e.target.value };
-      setLocal(next);
-      onChange(next);
+  const schedulePush = useCallback(
+    (next: Filters) => {
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(() => {
+        lastExternal.current = JSON.stringify(next);
+        onChange(next);
+      }, 400);
     },
-    [local, onChange],
+    [onChange],
   );
+
+  useEffect(() => {
+    return () => {
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+    };
+  }, []);
+
+  const setDebounced = (patch: Partial<Filters>) => {
+    const next = { ...local, ...patch };
+    setLocal(next);
+    schedulePush(next);
+  };
+
+  const setImmediate = (patch: Partial<Filters>) => {
+    const next = { ...local, ...patch };
+    setLocal(next);
+    lastExternal.current = JSON.stringify(next);
+    onChange(next);
+  };
 
   const activeCount = [
     filters.q,
@@ -85,7 +95,6 @@ export default function TourFilters({
 
   return (
     <>
-      {/* Mobile toggle */}
       <div className="mb-4 flex items-center justify-between lg:hidden">
         <button
           type="button"
@@ -131,7 +140,6 @@ export default function TourFilters({
             )}
           </div>
 
-          {/* Search */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Search
@@ -139,20 +147,19 @@ export default function TourFilters({
             <input
               type="search"
               value={local.q}
-              onChange={(e) => setLocal({ ...local, q: e.target.value })}
+              onChange={(e) => setDebounced({ q: e.target.value })}
               placeholder="Tour name, location…"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             />
           </div>
 
-          {/* Difficulty */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Difficulty
             </label>
             <select
               value={local.difficulty}
-              onChange={handleSelect("difficulty")}
+              onChange={(e) => setImmediate({ difficulty: e.target.value })}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             >
               {DIFFICULTIES.map((d) => (
@@ -163,7 +170,6 @@ export default function TourFilters({
             </select>
           </div>
 
-          {/* Price */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Price range
@@ -173,9 +179,7 @@ export default function TourFilters({
                 type="number"
                 min={0}
                 value={local.minPrice}
-                onChange={(e) =>
-                  setLocal({ ...local, minPrice: e.target.value })
-                }
+                onChange={(e) => setDebounced({ minPrice: e.target.value })}
                 placeholder="Min"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
               />
@@ -184,23 +188,20 @@ export default function TourFilters({
                 type="number"
                 min={0}
                 value={local.maxPrice}
-                onChange={(e) =>
-                  setLocal({ ...local, maxPrice: e.target.value })
-                }
+                onChange={(e) => setDebounced({ maxPrice: e.target.value })}
                 placeholder="Max"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
               />
             </div>
           </div>
 
-          {/* Rating */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Minimum rating
             </label>
             <select
               value={local.minRating}
-              onChange={handleSelect("minRating")}
+              onChange={(e) => setImmediate({ minRating: e.target.value })}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             >
               {RATINGS.map((r) => (
@@ -211,7 +212,6 @@ export default function TourFilters({
             </select>
           </div>
 
-          {/* Duration */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Max duration (days)
@@ -220,22 +220,19 @@ export default function TourFilters({
               type="number"
               min={1}
               value={local.maxDuration}
-              onChange={(e) =>
-                setLocal({ ...local, maxDuration: e.target.value })
-              }
+              onChange={(e) => setDebounced({ maxDuration: e.target.value })}
               placeholder="e.g. 7"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             />
           </div>
 
-          {/* Sort */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Sort by
             </label>
             <select
               value={local.sort}
-              onChange={handleSelect("sort")}
+              onChange={(e) => setImmediate({ sort: e.target.value })}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             >
               {SORTS.map((s) => (
