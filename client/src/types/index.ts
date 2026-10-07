@@ -7,6 +7,7 @@ export interface User {
   profileImage?: string;
   bio?: string;
   phone?: string;
+  phoneNumber?: string;
   languages?: string[];
   certifications?: string[];
   assignedTours?: unknown[];
