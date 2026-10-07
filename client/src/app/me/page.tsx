@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
 
 export default function MePage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isAdmin } = useAuth();
 
   return (
     <ProtectedRoute>
@@ -22,10 +22,8 @@ export default function MePage() {
           </div>
         ) : (
           <div className="mt-8 grid gap-6 md:grid-cols-3">
-            {/* Profile card */}
             <div className="md:col-span-2 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900">Profile</h2>
-
               <dl className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-gray-400">
@@ -64,12 +62,21 @@ export default function MePage() {
               </dl>
             </div>
 
-            {/* Quick actions */}
             <aside className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900">
                 Quick links
               </h2>
               <ul className="mt-4 space-y-2 text-sm">
+                {isAdmin && (
+                  <li>
+                    <Link
+                      href="/admin"
+                      className="block rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white transition hover:bg-emerald-700"
+                    >
+                      🛡️ Admin panel
+                    </Link>
+                  </li>
+                )}
                 <li>
                   <Link
                     href="/me/reviews"
