@@ -9,9 +9,8 @@ import {
   resetPassword,
   logout,
   invalidateAllSessions,
-  deleteMe,
 } from "../controllers/authController.js";
-import { protect, checkLoginAttempts } from "../middleware/authMiddleware.js";
+import { protect } from "../middleware/authMiddleware.js";
 import {
   validateAuth,
   validateUser,
@@ -25,17 +24,20 @@ import {
 
 const router = express.Router();
 
+/* ---------------- Public ---------------- */
+
 router.post("/register", registerLimiter, validateUser, register);
-router.post("/login", loginLimiter, checkLoginAttempts, validateAuth, login);
+router.post("/login", loginLimiter, validateAuth, login);
 router.post("/forgotpassword", resetPasswordLimiter, forgotPassword);
 router.put("/resetpassword/:resetToken", resetPassword);
+
+/* ---------------- Protected ---------------- */
 
 router.use(protect);
 
 router.get("/me", getMe);
 router.put("/updateme", userUpdateLimiter, updateMe);
 router.put("/updatepassword", userUpdateLimiter, updatePassword);
-router.delete("/deleteMe", deleteMe);
 router.get("/logout", logout);
 router.post("/invalidate-sessions", invalidateAllSessions);
 
