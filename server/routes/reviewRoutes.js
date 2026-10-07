@@ -30,6 +30,11 @@ import {
   userUpdateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
 
+/**
+ * `mergeParams: true` lets this router see params from the parent router,
+ * so when mounted as `router.use("/:tourId/reviews", reviewRouter)`, the
+ * `:tourId` is available inside these routes as `req.params.tourId`.
+ */
 const router = express.Router({ mergeParams: true });
 
 /* ============================================================
@@ -41,13 +46,28 @@ const router = express.Router({ mergeParams: true });
 router
   .route("/me/:tourId")
   .get(protect, getMyReviewForTour)
-  .patch(protect, userUpdateLimiter, validateReview, updateMyReview);
+  .patch(protect, userUpdateLimiter, updateMyReview);
 
-/* ---------- Custom collection routes ---------- */
+/* ---------- Current user's own reviews (all tours) ---------- */
 
-router.route("/stats").get(getReviewStats);
-router.route("/public").get(getTourReviews);
 router.route("/my-reviews").get(protect, getMyReviews);
+
+/* ---------- Tour-scoped custom routes ---------- */
+
+/**
+ * ✅ FIXED: `getReviewStats` needs a tourId. This route works when the
+ * router is mounted as `/tours/:tourId/reviews/stats` (mergeParams).
+ * If mounted at `/reviews/stats`, callers must pass `?tourId=...`.
+ */
+router.route("/stats").get(getReviewStats);
+
+/**
+ * ✅ FIXED: same as above — public tour reviews require a tourId.
+ */
+router.route("/public").get(getTourReviews);
+
+/* ---------- Batch (admin only) ---------- */
+
 router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
 
 /* ---------- Root collection ---------- */
@@ -57,7 +77,7 @@ router
   .get(getAllReviews)
   .post(protect, reviewCreationLimiter, validateReview, createReview);
 
-/* ---------- Bulk (also static) ---------- */
+/* ---------- Bulk (static, so before /:id) ---------- */
 
 router
   .route("/bulk/delete")
@@ -70,7 +90,8 @@ router
 router
   .route("/:id")
   .get(getReview)
-  .patch(protect, checkValidId, userUpdateLimiter, validateReview, updateReview)
+
+  .patch(protect, checkValidId, userUpdateLimiter, updateReview)
   .delete(protect, checkValidId, deleteReview);
 
 /* ---------- Actions on a specific review ---------- */
@@ -83,6 +104,11 @@ router
   .route("/:id/response")
   .post(protect, checkValidId, userUpdateLimiter, addReviewResponse);
 
+/**
+ * ✅ Admin moderation — uses the model-method handlers in
+ * reviewController.js (`review.approve()` / `review.reject()`),
+ * which also recalculate tour averages.
+ */
 router
   .route("/:id/approve")
   .patch(
@@ -106,6 +132,8 @@ router
 router
   .route("/:id/flag")
   .post(protect, checkValidId, userUpdateLimiter, flagReview);
+
+/* ---------- Admin recovery ---------- */
 
 router
   .route("/:id/permanent")
