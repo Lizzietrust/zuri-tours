@@ -248,7 +248,7 @@ const createReview = createOne(Review, {
 });
 
 /* ============================================================
-   UPDATE FACTORY HANDLER (existing — admin/owner path)
+   UPDATE FACTORY HANDLER
    ============================================================ */
 
 const updateReview = updateOne(Review, {
@@ -520,6 +520,12 @@ const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * ✅ KEPT as-is: uses `review.approve()` instance method, which also
+ * recalculates the tour's average rating. Do NOT replace with a
+ * findByIdAndUpdate + moderatedAt/moderatedBy — that would silently
+ * skip the tour-average recalculation and the fields may not exist.
+ */
 const approveReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -549,6 +555,9 @@ const approveReview = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * ✅ KEPT as-is: uses `review.reject()` instance method.
+ */
 const rejectReview = catchAsync(async (req, res) => {
   const { id } = req.params;
 
@@ -607,11 +616,20 @@ const flagReview = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * ✅ FIXED: now reads tourId from `req.params.tourId`, `req.params.id`,
+ * or `req.query.tourId` in that order. Also handles the case where the
+ * route is mounted under `/tours/:tourId/reviews/stats` thanks to
+ * `mergeParams: true`.
+ */
 const getReviewStats = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
 
   if (!tourId) {
-    throw new AppError("Tour ID is required", 400);
+    throw new AppError(
+      "Tour ID is required (provide :tourId in the path or ?tourId=...)",
+      400,
+    );
   }
 
   const tour = await Tour.findById(tourId);
@@ -858,7 +876,7 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
 });
 
 /* ============================================================
-   DUPLICATE-PREVENTION HELPERS — new custom handlers
+   DUPLICATE-PREVENTION HELPERS
    ============================================================ */
 
 const getMyReviewForTour = catchAsync(async (req, res, next) => {
@@ -922,12 +940,6 @@ const updateMyReview = catchAsync(async (req, res, next) => {
     data: { review: populatedReview },
   });
 });
-
-/**
- * GET /reviews/me
- * Currently provided by getMyReviews above.
- * This is just an alias export name for clarity.
- */
 
 /* ============================================================
    EXPORTS
