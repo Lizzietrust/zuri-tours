@@ -40,12 +40,21 @@ export interface Tour {
   ratingsAverage: number;
   ratingsQuantity: number;
   category: string;
-  location: TourLocation;
+  location?: TourLocation;
   featured?: boolean;
 
   hasUserReviewed?: boolean;
   distance?: number;
   distanceUnit?: string;
+  distanceInMeters?: number;
+
+  userReview?: {
+    _id: string;
+    rating: number;
+    review: string;
+    createdAt: string;
+    status: "pending" | "approved" | "rejected" | "flagged";
+  };
 }
 
 export interface Review {
@@ -83,6 +92,7 @@ export interface ApiSingleResponse<T> {
   data: Record<string, T>;
 }
 
+/** UI-side filter state — all strings because they come from inputs/selects */
 export interface TourFilters {
   q: string;
   difficulty: string;
@@ -94,6 +104,7 @@ export interface TourFilters {
   sort: string;
 }
 
+/** API-side query params — numbers where appropriate */
 export interface TourQueryParams {
   q?: string;
   difficulty?: string;
@@ -108,6 +119,7 @@ export interface TourQueryParams {
 
   lat?: number;
   lng?: number;
-
   radius?: number;
+  unit?: string;
+  sortBy?: "distance" | "price" | "ratingsAverage" | "duration";
 }
