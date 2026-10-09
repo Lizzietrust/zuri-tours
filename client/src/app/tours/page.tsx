@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTours } from "@/hooks/useTours";
 import TourCard from "@/components/tours/TourCard";
 import TourCardSkeleton from "@/components/tours/TourCardSkeleton";
@@ -20,7 +21,33 @@ const DEFAULT_FILTERS: Filters = {
   sort: "-createdAt",
 };
 
+const FILTER_KEYS = Object.keys(DEFAULT_FILTERS) as (keyof Filters)[];
+
 const EMPTY_TOURS: Tour[] = [];
+
+/* ---------- URL <-> filters ---------- */
+
+function parseFilters(search: string): Filters {
+  const sp = new URLSearchParams(search);
+  const next: Filters = { ...DEFAULT_FILTERS };
+  for (const key of FILTER_KEYS) {
+    const value = sp.get(key);
+    if (value !== null) next[key] = value;
+  }
+  return next;
+}
+
+function toSearchString(filters: Filters): string {
+  const sp = new URLSearchParams();
+  for (const key of FILTER_KEYS) {
+    const value = filters[key];
+    if (value !== "" && value !== DEFAULT_FILTERS[key]) sp.set(key, value);
+  }
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/* ---------- Filters -> API params ---------- */
 
 function toQueryParams(filters: Filters): TourQueryParams {
   const params: TourQueryParams = { sort: filters.sort };
@@ -29,66 +56,65 @@ function toQueryParams(filters: Filters): TourQueryParams {
   if (filters.difficulty) params.difficulty = filters.difficulty;
   if (filters.category) params.category = filters.category;
 
-  if (filters.minPrice !== "") {
-    const n = Number(filters.minPrice);
-    if (Number.isFinite(n)) params.minPrice = n;
-  }
-  if (filters.maxPrice !== "") {
-    const n = Number(filters.maxPrice);
-    if (Number.isFinite(n)) params.maxPrice = n;
-  }
-  if (filters.minRating !== "") {
-    const n = Number(filters.minRating);
-    if (Number.isFinite(n)) params.minRating = n;
-  }
-  if (filters.maxDuration !== "") {
-    const n = Number(filters.maxDuration);
-    if (Number.isFinite(n) && n > 0) params.maxDuration = n;
-  }
+  const num = (v: string) =>
+    v !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined;
+
+  const minPrice = num(filters.minPrice);
+  const maxPrice = num(filters.maxPrice);
+  const minRating = num(filters.minRating);
+  const maxDuration = num(filters.maxDuration);
+
+  if (minPrice !== undefined) params.minPrice = minPrice;
+  if (maxPrice !== undefined) params.maxPrice = maxPrice;
+  if (minRating !== undefined) params.minRating = minRating;
+  if (maxDuration !== undefined && maxDuration > 0)
+    params.maxDuration = maxDuration;
 
   return params;
 }
 
+/**
+ * Safety net for filters the backend list endpoint doesn't apply
+ * (category and maxDuration aren't handled by getAllTours).
+ * NOTE: `q` is intentionally NOT filtered here — the server does the search.
+ */
 function applyClientFilters(tours: Tour[], filters: Filters): Tour[] {
   return tours.filter((tour) => {
-    if (filters.q.trim()) {
-      const needle = filters.q.trim().toLowerCase();
-      const haystack = [
-        tour.name,
-        tour.summary,
-        tour.description,
-        tour.location?.address,
-        tour.location?.city,
-        tour.location?.country,
-        tour.category,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      if (!haystack.includes(needle)) return false;
-    }
-
     if (filters.difficulty && tour.difficulty !== filters.difficulty)
       return false;
     if (filters.category && tour.category !== filters.category) return false;
 
-    if (filters.minPrice !== "") {
-      const n = Number(filters.minPrice);
-      if (Number.isFinite(n) && tour.price < n) return false;
-    }
-    if (filters.maxPrice !== "") {
-      const n = Number(filters.maxPrice);
-      if (Number.isFinite(n) && tour.price > n) return false;
-    }
-    if (filters.minRating !== "") {
-      const n = Number(filters.minRating);
-      if (Number.isFinite(n) && (tour.ratingsAverage ?? 0) < n) return false;
-    }
-    if (filters.maxDuration !== "") {
-      const n = Number(filters.maxDuration);
-      if (Number.isFinite(n) && tour.duration > n) return false;
-    }
+    const minPrice = Number(filters.minPrice);
+    if (
+      filters.minPrice !== "" &&
+      Number.isFinite(minPrice) &&
+      tour.price < minPrice
+    )
+      return false;
+
+    const maxPrice = Number(filters.maxPrice);
+    if (
+      filters.maxPrice !== "" &&
+      Number.isFinite(maxPrice) &&
+      tour.price > maxPrice
+    )
+      return false;
+
+    const minRating = Number(filters.minRating);
+    if (
+      filters.minRating !== "" &&
+      Number.isFinite(minRating) &&
+      (tour.ratingsAverage ?? 0) < minRating
+    )
+      return false;
+
+    const maxDuration = Number(filters.maxDuration);
+    if (
+      filters.maxDuration !== "" &&
+      Number.isFinite(maxDuration) &&
+      tour.duration > maxDuration
+    )
+      return false;
 
     return true;
   });
@@ -102,7 +128,10 @@ function ErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex flex-col items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      role="alert"
+      className="flex flex-col items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+    >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 font-bold text-red-600">
           !
@@ -123,8 +152,23 @@ function ErrorBanner({
   );
 }
 
-export default function ToursPage() {
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+function ToursContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
+
+  const filters = useMemo(() => parseFilters(search), [search]);
+
+  const setFilters = useCallback(
+    (next: Filters) => {
+      router.replace(`/tours${toSearchString(next)}`, { scroll: false });
+    },
+    [router],
+  );
+
+  const handleReset = useCallback(() => {
+    router.replace("/tours", { scroll: false });
+  }, [router]);
 
   const queryParams = useMemo(() => toQueryParams(filters), [filters]);
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -134,7 +178,6 @@ export default function ToursPage() {
     () => (data?.data?.tours ?? EMPTY_TOURS) as Tour[],
     [data],
   );
-
   const tours = useMemo(
     () => applyClientFilters(rawTours, filters),
     [rawTours, filters],
@@ -144,18 +187,8 @@ export default function ToursPage() {
     (error as { message?: string } | null)?.message ||
     "An unexpected error occurred.";
 
-  const handleReset = useCallback(() => setFilters(DEFAULT_FILTERS), []);
-
   const serverTotal = data?.total ?? rawTours.length;
-  const showingOnPage = tours.length;
-  const isFiltered =
-    filters.q !== "" ||
-    filters.difficulty !== "" ||
-    filters.minPrice !== "" ||
-    filters.maxPrice !== "" ||
-    filters.minRating !== "" ||
-    filters.maxDuration !== "" ||
-    filters.category !== "";
+  const isFiltered = FILTER_KEYS.some((k) => k !== "sort" && filters[k] !== "");
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
@@ -163,17 +196,28 @@ export default function ToursPage() {
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-            All Tours
+            {filters.q ? (
+              <>
+                Results for{" "}
+                <span className="text-emerald-700">
+                  &ldquo;{filters.q}&rdquo;
+                </span>
+              </>
+            ) : (
+              "All Tours"
+            )}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Handpicked adventures around the world
+            {filters.q
+              ? `${tours.length} ${tours.length === 1 ? "tour" : "tours"} found`
+              : "Handpicked adventures around the world"}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {!isLoading && !isError && tours.length > 0 && (
+          {!isLoading && !isError && tours.length > 0 && !filters.q && (
             <span className="hidden text-sm text-gray-500 sm:inline">
-              {showingOnPage} on this page · {serverTotal} total
+              {tours.length} on this page · {serverTotal} total
             </span>
           )}
           <Link
@@ -206,7 +250,10 @@ export default function ToursPage() {
           />
 
           {isLoading && (
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            <div
+              className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3"
+              aria-busy="true"
+            >
               {Array.from({ length: 6 }).map((_, i) => (
                 <TourCardSkeleton key={i} />
               ))}
@@ -215,13 +262,19 @@ export default function ToursPage() {
 
           {!isLoading && !isError && tours.length === 0 && (
             <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center">
-              <span className="text-4xl">{isFiltered ? "🔍" : "🧭"}</span>
+              <span className="text-4xl" aria-hidden>
+                {isFiltered ? "🔍" : "🧭"}
+              </span>
               <h2 className="mt-3 text-lg font-semibold text-gray-800">
-                {isFiltered ? "No tours match your filters" : "No tours yet"}
+                {filters.q
+                  ? `No tours found for “${filters.q}”`
+                  : isFiltered
+                    ? "No tours match your filters"
+                    : "No tours yet"}
               </h2>
               <p className="mt-1 max-w-md text-sm text-gray-500">
                 {isFiltered
-                  ? "Try widening your price range, lowering the rating threshold, or clearing a filter."
+                  ? "Try a different keyword, widen your price range, or clear a filter."
                   : "We haven't published any tours. Check back soon."}
               </p>
               {isFiltered && (
@@ -244,7 +297,10 @@ export default function ToursPage() {
                 ))}
               </div>
               {isFetching && (
-                <p className="mt-6 text-center text-xs text-gray-400">
+                <p
+                  className="mt-6 text-center text-xs text-gray-400"
+                  role="status"
+                >
                   Refreshing…
                 </p>
               )}
@@ -253,5 +309,23 @@ export default function ToursPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ToursPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-7xl px-6 py-12">
+          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <TourCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <ToursContent />
+    </Suspense>
   );
 }
