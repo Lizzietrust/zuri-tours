@@ -106,7 +106,6 @@ export default function HomePage() {
             curated for the way you love to travel.
           </p>
 
-          {/* Search */}
           <form
             onSubmit={onSearch}
             role="search"
@@ -137,7 +136,7 @@ export default function HomePage() {
             />
             <button
               type="submit"
-              className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+              className="cursor-pointer rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
             >
               Search
             </button>
@@ -186,83 +185,85 @@ export default function HomePage() {
       </section>
 
       {/* ======================= FEATURED TOURS ======================= */}
-      <section className="mx-auto max-w-7xl px-6 py-16">
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-              Featured tours
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              The highest-rated adventures our travelers love
-            </p>
-          </div>
-          <Link
-            href="/tours"
-            className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
-          >
-            View all tours →
-          </Link>
-        </div>
-
-        {isLoading && (
-          <div
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
-            aria-busy="true"
-          >
-            {Array.from({ length: FEATURED_COUNT }).map((_, i) => (
-              <TourCardSkeleton key={i} />
-            ))}
-          </div>
-        )}
-
-        {isError && (
-          <div
-            role="alert"
-            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800"
-          >
-            <span>We couldn&apos;t load featured tours right now.</span>
-            <span className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => refetch()}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
-              >
-                Try again
-              </button>
-              <Link
-                href="/tours"
-                className="py-1.5 font-semibold underline hover:no-underline"
-              >
-                Browse all tours
-              </Link>
-            </span>
-          </div>
-        )}
-
-        {hasTours && (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {featured!.map((tour) => (
-              <TourCard key={tour._id} tour={tour} />
-            ))}
-          </div>
-        )}
-
-        {isEmpty && (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-10 text-center">
-            <span className="text-4xl" aria-hidden>
-              🧭
-            </span>
-            <p className="mt-3 text-sm text-gray-600">
-              No tours published yet. Check back soon!
-            </p>
+      <section className="bg-white">
+        <div className="mx-auto max-w-7xl px-6 py-16">
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
+                Featured tours
+              </h2>
+              <p className="mt-1 text-sm text-gray-600">
+                The highest-rated adventures our travelers love
+              </p>
+            </div>
             <Link
               href="/tours"
-              className="mt-4 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
             >
-              Browse tours
+              View all tours →
             </Link>
           </div>
-        )}
+
+          {isLoading && (
+            <div
+              className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+              aria-busy="true"
+            >
+              {Array.from({ length: FEATURED_COUNT }).map((_, i) => (
+                <TourCardSkeleton key={i} />
+              ))}
+            </div>
+          )}
+
+          {isError && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800"
+            >
+              <span>We couldn&apos;t load featured tours right now.</span>
+              <span className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => refetch()}
+                  className="cursor-pointer rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
+                >
+                  Try again
+                </button>
+                <Link
+                  href="/tours"
+                  className="py-1.5 font-semibold underline hover:no-underline"
+                >
+                  Browse all tours
+                </Link>
+              </span>
+            </div>
+          )}
+
+          {hasTours && (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {featured!.map((tour) => (
+                <TourCard key={tour._id} tour={tour} />
+              ))}
+            </div>
+          )}
+
+          {isEmpty && (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-10 text-center">
+              <span className="text-4xl" aria-hidden>
+                🧭
+              </span>
+              <p className="mt-3 text-sm text-gray-600">
+                No tours published yet. Check back soon!
+              </p>
+              <Link
+                href="/tours"
+                className="mt-4 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                Browse tours
+              </Link>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* ========================= WHY ZURI ========================== */}
@@ -300,56 +301,60 @@ export default function HomePage() {
       </section>
 
       {/* ======================= HOW IT WORKS ======================== */}
-      <section className="mx-auto max-w-5xl px-6 py-16">
-        <h2 className="text-center text-2xl font-bold text-gray-900 sm:text-3xl">
-          How it works
-        </h2>
-        <ol className="mt-10 grid gap-8 md:grid-cols-3">
-          {STEPS.map((s) => (
-            <li key={s.n} className="text-center">
-              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-emerald-500 to-sky-500 text-lg font-bold text-white shadow-md">
-                {s.n}
-              </span>
-              <h3 className="mt-4 text-lg font-semibold text-gray-900">
-                {s.title}
-              </h3>
-              <p className="mt-1 text-sm text-gray-600">{s.body}</p>
-            </li>
-          ))}
-        </ol>
+      <section className="bg-white">
+        <div className="mx-auto max-w-5xl px-6 py-16">
+          <h2 className="text-center text-2xl font-bold text-gray-900 sm:text-3xl">
+            How it works
+          </h2>
+          <ol className="mt-10 grid gap-8 md:grid-cols-3">
+            {STEPS.map((s) => (
+              <li key={s.n} className="text-center">
+                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-emerald-500 to-sky-500 text-lg font-bold text-white shadow-md">
+                  {s.n}
+                </span>
+                <h3 className="mt-4 text-lg font-semibold text-gray-900">
+                  {s.title}
+                </h3>
+                <p className="mt-1 text-sm text-gray-600">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
       </section>
 
       {/* ============================ CTA ============================ */}
-      <section className="mx-auto max-w-5xl px-6 pb-20">
-        <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-emerald-600 to-sky-600 px-8 py-12 text-center shadow-xl sm:px-16 sm:py-16">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-20"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at 20% 20%, white 0%, transparent 40%), radial-gradient(circle at 80% 80%, white 0%, transparent 40%)",
-            }}
-          />
-          <div className="relative">
-            <h2 className="text-2xl font-bold text-white sm:text-3xl">
-              Ready for your next adventure?
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-emerald-50">
-              Sign up free and start planning your trip today.
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-4">
-              <Link
-                href="/register"
-                className="rounded-xl bg-white px-6 py-3 text-base font-semibold text-emerald-700 shadow-lg transition hover:bg-emerald-50"
-              >
-                Create free account
-              </Link>
-              <Link
-                href="/tours"
-                className="rounded-xl border border-white/70 px-6 py-3 text-base font-semibold text-white transition hover:bg-white/10"
-              >
-                Browse tours
-              </Link>
+      <section className="bg-white">
+        <div className="mx-auto max-w-5xl px-6 pb-20">
+          <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-emerald-600 to-sky-600 px-8 py-12 text-center shadow-xl sm:px-16 sm:py-16">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 opacity-20"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 20% 20%, white 0%, transparent 40%), radial-gradient(circle at 80% 80%, white 0%, transparent 40%)",
+              }}
+            />
+            <div className="relative">
+              <h2 className="text-2xl font-bold text-white sm:text-3xl">
+                Ready for your next adventure?
+              </h2>
+              <p className="mx-auto mt-3 max-w-xl text-emerald-50">
+                Sign up free and start planning your trip today.
+              </p>
+              <div className="mt-8 flex flex-wrap justify-center gap-4">
+                <Link
+                  href="/register"
+                  className="rounded-xl bg-white px-6 py-3 text-base font-semibold text-emerald-700 shadow-lg transition hover:bg-emerald-50"
+                >
+                  Create free account
+                </Link>
+                <Link
+                  href="/tours"
+                  className="rounded-xl border border-white/70 px-6 py-3 text-base font-semibold text-white transition hover:bg-white/10"
+                >
+                  Browse tours
+                </Link>
+              </div>
             </div>
           </div>
         </div>
