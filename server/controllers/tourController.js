@@ -269,10 +269,38 @@ const getAllToursFactory = getAll(Tour, {
   resourceKey: "tours",
 
   transformFilter: (filter, req) => {
-    const { minPrice, maxPrice, minRating, maxRating, startDate, endDate } =
+    const { minPrice, maxPrice, minRating, maxRating, startDate, endDate, q } =
       req.query;
 
     const newFilter = { ...filter };
+
+    delete newFilter.q;
+    delete newFilter.lat;
+    delete newFilter.lng;
+    delete newFilter.radius;
+    delete newFilter.unit;
+    delete newFilter.minPrice;
+    delete newFilter.maxPrice;
+    delete newFilter.minRating;
+    delete newFilter.maxRating;
+    delete newFilter.startDate;
+    delete newFilter.endDate;
+
+    if (q && q.trim()) {
+      const regex = new RegExp(
+        q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        "i",
+      );
+
+      newFilter.$or = [
+        { name: regex },
+        { summary: regex },
+        { description: regex },
+        { "location.address": regex },
+        { "location.city": regex },
+        { "location.country": regex },
+      ];
+    }
 
     if (minPrice || maxPrice) {
       newFilter.price = {};
@@ -291,18 +319,6 @@ const getAllToursFactory = getAll(Tour, {
       if (startDate) newFilter.startDates.$gte = new Date(startDate);
       if (endDate) newFilter.startDates.$lte = new Date(endDate);
     }
-
-    delete newFilter.lat;
-    delete newFilter.lng;
-    delete newFilter.radius;
-    delete newFilter.unit;
-
-    delete newFilter.minPrice;
-    delete newFilter.maxPrice;
-    delete newFilter.minRating;
-    delete newFilter.maxRating;
-    delete newFilter.startDate;
-    delete newFilter.endDate;
 
     return newFilter;
   },
