@@ -1,24 +1,50 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import Logo from "./Logo";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 export default function Header() {
   const { user, isAuthenticated, isAdmin, isGuide, logout, isLoading } =
     useAuth();
   const pathname = usePathname();
 
-  const linkClass = (href: string) =>
-    `transition hover:text-emerald-700 ${
-      pathname === href ? "font-semibold text-emerald-700" : "text-gray-700"
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const linkClass = (href: string) => {
+    const active = pathname === href || pathname.startsWith(`${href}/`);
+    return `transition hover:text-emerald-700 ${
+      active ? "font-semibold text-emerald-700" : "text-gray-700"
     }`;
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      toast.success("Logged out successfully", {
+        description: "See you again soon!",
+      });
+    } catch (err) {
+      const message =
+        (err as { message?: string })?.message ?? "Something went wrong";
+      toast.error("Logout failed", {
+        description: `${message}. Your session on this device has been cleared.`,
+      });
+    } finally {
+      setLoggingOut(false);
+      setConfirmOpen(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
       <nav className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
-        {/* Logo */}
         <Logo size={36} />
 
         {/* Main links */}
@@ -60,7 +86,7 @@ export default function Header() {
               </Link>
               <button
                 type="button"
-                onClick={logout}
+                onClick={() => setConfirmOpen(true)}
                 className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
               >
                 Log out
@@ -84,6 +110,18 @@ export default function Header() {
           )}
         </div>
       </nav>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        variant="danger"
+        title="Log out of Zuri Tours?"
+        description="You'll need to sign in again to book tours or view your account."
+        confirmLabel="Yes, log out"
+        cancelLabel="Stay signed in"
+        isLoading={loggingOut}
+        onConfirm={handleLogout}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </header>
   );
 }
