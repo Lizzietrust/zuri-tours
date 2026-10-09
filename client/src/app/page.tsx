@@ -343,7 +343,7 @@ export default function HomePage() {
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-4">
                 <Link
-                  href="/register"
+                  href="/signup"
                   className="rounded-xl bg-white px-6 py-3 text-base font-semibold text-emerald-700 shadow-lg transition hover:bg-emerald-50"
                 >
                   Create free account
