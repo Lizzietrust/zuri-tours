@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import Logo from "./Logo";
 
 export default function Header() {
   const { user, isAuthenticated, isAdmin, isGuide, logout, isLoading } =
@@ -18,13 +19,7 @@ export default function Header() {
     <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
       <nav className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
         {/* Logo */}
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-xl font-bold text-emerald-700"
-        >
-          <span className="text-2xl">🏔️</span>
-          <span>Zuri Tours</span>
-        </Link>
+        <Logo size={36} />
 
         {/* Main links */}
         <ul className="hidden items-center gap-6 text-sm md:flex">
