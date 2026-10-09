@@ -151,7 +151,7 @@ export default function HomePage() {
               Browse Tours
             </Link>
             <Link
-              href="/register"
+              href="/signup"
               className="rounded-xl border border-emerald-600 bg-white px-6 py-3 text-base font-semibold text-emerald-700 transition hover:bg-emerald-50"
             >
               Get Started
