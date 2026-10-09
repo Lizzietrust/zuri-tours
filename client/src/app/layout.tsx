@@ -5,6 +5,7 @@ import Providers from "./providers";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import "leaflet/dist/leaflet.css";
+import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,6 +28,7 @@ export default function RootLayout({
             <main className="flex-1">{children}</main>
             <Footer />
           </div>
+          <Toaster position="top-right" richColors closeButton />
         </Providers>
       </body>
     </html>
