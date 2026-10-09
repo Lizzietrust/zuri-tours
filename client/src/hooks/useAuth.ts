@@ -1,26 +1,35 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { getToken } from "@/lib/api";
 import type { User } from "@/types";
 
+const subscribe = () => () => {};
+
 export function useAuth() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const hasToken = typeof window !== "undefined" && !!getToken();
+  const mounted = useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false,
+  );
+
+  const hasToken = mounted && !!getToken();
 
   const {
     data: user,
-    isLoading,
+    isLoading: isQueryLoading,
     isError,
     refetch,
   } = useQuery<User | null>({
     queryKey: ["me"],
     queryFn: async () => {
-      if (!hasToken) return null;
+      if (!getToken()) return null;
       try {
         return await authService.getMe();
       } catch {
@@ -32,12 +41,20 @@ export function useAuth() {
     staleTime: 5 * 60 * 1000,
   });
 
+  /**
+   * Always clears local state and redirects, even if the server call fails
+   * (authService.logout clears the token in `finally`). The error is then
+   * re-thrown so the caller can show an error toast.
+   */
   const logout = async () => {
-    await authService.logout();
-    queryClient.setQueryData(["me"], null);
-    queryClient.removeQueries({ queryKey: ["tours"] });
-    router.push("/");
-    router.refresh();
+    try {
+      await authService.logout();
+    } finally {
+      queryClient.setQueryData(["me"], null);
+      queryClient.removeQueries({ queryKey: ["tours"] });
+      router.push("/");
+      router.refresh();
+    }
   };
 
   const isAuthenticated = !!user;
@@ -47,7 +64,7 @@ export function useAuth() {
 
   return {
     user: user ?? null,
-    isLoading,
+    isLoading: !mounted || isQueryLoading,
     isError,
     isAuthenticated,
     isAdmin,
