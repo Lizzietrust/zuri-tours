@@ -123,3 +123,72 @@ export interface TourQueryParams {
   unit?: string;
   sortBy?: "distance" | "price" | "ratingsAverage" | "duration";
 }
+
+/* ============================================================
+   GUIDE TYPES
+   ============================================================ */
+
+export interface GuideAvailability {
+  monday: boolean;
+  tuesday: boolean;
+  wednesday: boolean;
+  thursday: boolean;
+  friday: boolean;
+  saturday: boolean;
+  sunday: boolean;
+}
+
+export interface GuideEmergencyContact {
+  name?: string;
+  phone?: string;
+  relationship?: string;
+}
+
+export interface GuidePerformanceMetrics {
+  toursLed: number;
+  customerSatisfaction: number;
+  completionRate: number;
+  averageRating: number;
+}
+
+export interface Guide {
+  _id: string;
+  name: string;
+  email: string;
+  role: "guide" | "lead-guide";
+  photo?: string;
+  profileImage?: string;
+  bio?: string;
+  phoneNumber?: string;
+  languages?: string[];
+  certifications?: string[];
+  experienceYears?: number;
+  specialties?: string[];
+  guideSpecialties?: string[];
+  availability?: GuideAvailability;
+  emergencyContact?: GuideEmergencyContact;
+  rating?: number;
+  totalReviews?: number;
+  hireDate?: string;
+  performanceMetrics?: GuidePerformanceMetrics;
+  assignedTours?: Tour[] | string[];
+}
+
+export interface GuideStatistics {
+  totalTours: number;
+  upcomingTours: number;
+  completedTours: number;
+  totalRevenue: number;
+  averageRating: number;
+  totalReviews: number;
+}
+
+export interface GuidePerformance {
+  totalToursLed: number;
+  totalRevenue: number;
+  averageTourDuration: number;
+  customerSatisfaction: number;
+  completionRate: number;
+  rating: number;
+  totalReviews: number;
+}
