@@ -6,11 +6,11 @@ import { AppError } from "../utils/appError.js";
 export const getGuides = catchAsync(async (req, res) => {
   const guides = await User.find({
     role: { $in: ["guide", "lead-guide"] },
-    isActive: true,
-    accountDeleted: false,
+    active: { $ne: false },
+    accountDeleted: { $ne: true },
   })
     .select(
-      "name email photo bio experienceYears specialties languages rating totalReviews",
+      "name email photo bio experienceYears guideSpecialties languages rating totalReviews",
     )
     .populate({
       path: "assignedTours",
@@ -31,34 +31,37 @@ export const getGuide = catchAsync(async (req, res) => {
   const guide = await User.findOne({
     _id: userId,
     role: { $in: ["guide", "lead-guide"] },
-    isActive: true,
-    accountDeleted: false,
+    active: { $ne: false },
+    accountDeleted: { $ne: true },
   })
     .select(
-      "name email photo bio experienceYears specialties languages rating totalReviews certifications phoneNumber emergencyContact availability",
+      "name email photo bio experienceYears guideSpecialties languages rating totalReviews certifications phoneNumber emergencyContact availability",
     )
     .populate({
       path: "assignedTours",
-      select: "name slug price duration difficulty ratingsAverage startDates",
+      select:
+        "name slug price duration difficulty ratingsAverage ratingsQuantity startDates summary imageCover maxGroupSize",
     });
 
   if (!guide) {
     throw new AppError("Guide not found", 404);
   }
 
-  const toursWithReviews = await Tour.find({
-    guides: guide._id,
-  }).select("reviews ratingsAverage");
+  const toursWithReviews = await Tour.find({ guides: guide._id }).select(
+    "ratingsQuantity ratingsAverage",
+  );
 
   const totalReviews = toursWithReviews.reduce(
-    (sum, tour) => sum + (tour.reviews ? tour.reviews.length : 0),
+    (sum, tour) => sum + (tour.ratingsQuantity || 0),
     0,
   );
 
   const avgRating =
     toursWithReviews.length > 0
-      ? toursWithReviews.reduce((sum, tour) => sum + tour.ratingsAverage, 0) /
-        toursWithReviews.length
+      ? toursWithReviews.reduce(
+          (sum, tour) => sum + (tour.ratingsAverage || 0),
+          0,
+        ) / toursWithReviews.length
       : 0;
 
   const guideData = guide.toObject();
@@ -78,7 +81,7 @@ export const updateGuideProfile = catchAsync(async (req, res) => {
     "photo",
     "bio",
     "experienceYears",
-    "specialties",
+    "guideSpecialties",
     "languages",
     "phoneNumber",
     "availability",
@@ -93,10 +96,14 @@ export const updateGuideProfile = catchAsync(async (req, res) => {
     }
   });
 
+  if (req.body.specialties && !updateData.guideSpecialties) {
+    updateData.guideSpecialties = req.body.specialties;
+  }
+
   const guide = await User.findByIdAndUpdate(req.user._id, updateData, {
     new: true,
     runValidators: true,
-  }).select("name email photo bio experienceYears specialties languages");
+  }).select("name email photo bio experienceYears guideSpecialties languages");
 
   res.status(200).json({
     status: "success",
@@ -113,17 +120,19 @@ export const getGuideStatistics = catchAsync(async (req, res) => {
   });
 
   const totalTours = tours.length;
-  const upcomingTours = tours.filter((tour) => {
-    const now = new Date();
 
-    return tour.startDates && tour.startDates.some((date) => date >= now);
-  });
+  const now = new Date();
 
-  const completedTours = tours.filter((tour) => {
-    const now = new Date();
+  const upcomingTours = tours.filter(
+    (tour) => tour.startDates && tour.startDates.some((date) => date >= now),
+  );
 
-    return tour.startDates && tour.startDates.every((date) => date < now);
-  });
+  const completedTours = tours.filter(
+    (tour) =>
+      tour.startDates &&
+      tour.startDates.length > 0 &&
+      tour.startDates.every((date) => date < now),
+  );
 
   const totalRevenue = tours.reduce((sum, tour) => sum + (tour.price || 0), 0);
 
@@ -177,10 +186,11 @@ export const getGuidePerformance = catchAsync(async (req, res) => {
 export const getAllGuidesAdmin = catchAsync(async (req, res) => {
   const guides = await User.find({
     role: { $in: ["guide", "lead-guide"] },
-    accountDeleted: false,
+    active: { $ne: false },
+    accountDeleted: { $ne: true },
   })
     .select(
-      "name email role photo isActive experienceYears specialties rating totalReviews",
+      "name email role photo active experienceYears guideSpecialties rating totalReviews",
     )
     .populate({
       path: "assignedTours",
@@ -207,12 +217,12 @@ export const updateGuideStatus = catchAsync(async (req, res) => {
       _id: id,
       role: { $in: ["guide", "lead-guide"] },
     },
-    { isActive },
+    { active: isActive },
     {
       new: true,
       runValidators: true,
     },
-  ).select("name email role isActive");
+  ).select("name email role active");
 
   if (!guide) {
     throw new AppError("Guide not found", 404);
@@ -243,12 +253,20 @@ export const assignTourToGuide = catchAsync(async (req, res) => {
     throw new AppError("Tour not found", 404);
   }
 
-  if (!guide.assignedTours.includes(tourId)) {
+  const alreadyAssigned = guide.assignedTours.some(
+    (t) => t.toString() === tourId.toString(),
+  );
+
+  if (!alreadyAssigned) {
     guide.assignedTours.push(tourId);
     await guide.save();
   }
 
-  if (!tour.guides.includes(guideId)) {
+  const tourHasGuide = tour.guides.some(
+    (g) => g.toString() === guideId.toString(),
+  );
+
+  if (!tourHasGuide) {
     tour.guides.push(guideId);
     await tour.save();
   }
