@@ -261,7 +261,13 @@ const bulkDeleteTours = deleteMany(Tour, {
 const getAllToursFactory = getAll(Tour, {
   modelName: "Tour",
   searchFields: ["name", "summary", "description", "location"],
-  allowedFilters: ["difficulty", "price", "ratingsAverage", "duration"],
+  allowedFilters: [
+    "difficulty",
+    "price",
+    "ratingsAverage",
+    "duration",
+    "category",
+  ],
   allowedSorts: ["createdAt", "price", "ratingsAverage", "duration", "name"],
   defaultSort: { createdAt: -1 },
   defaultLimit: 10,
@@ -269,24 +275,42 @@ const getAllToursFactory = getAll(Tour, {
   resourceKey: "tours",
 
   transformFilter: (filter, req) => {
-    const { minPrice, maxPrice, minRating, maxRating, startDate, endDate, q } =
-      req.query;
+    const {
+      minPrice,
+      maxPrice,
+      minRating,
+      maxRating,
+      startDate,
+      endDate,
+      q,
+      maxDuration,
+    } = req.query;
 
     const newFilter = { ...filter };
 
-    delete newFilter.q;
-    delete newFilter.lat;
-    delete newFilter.lng;
-    delete newFilter.radius;
-    delete newFilter.unit;
-    delete newFilter.minPrice;
-    delete newFilter.maxPrice;
-    delete newFilter.minRating;
-    delete newFilter.maxRating;
-    delete newFilter.startDate;
-    delete newFilter.endDate;
+    [
+      "q",
+      "lat",
+      "lng",
+      "radius",
+      "unit",
+      "minPrice",
+      "maxPrice",
+      "minRating",
+      "maxRating",
+      "startDate",
+      "endDate",
+      "maxDuration",
+    ].forEach((key) => delete newFilter[key]);
 
-    if (q && q.trim()) {
+    const toNum = (v) => {
+      const n = Number(v);
+
+      return v !== undefined && v !== "" && Number.isFinite(n) ? n : undefined;
+    };
+
+    /* ---------- Text search ---------- */
+    if (typeof q === "string" && q.trim()) {
       const regex = new RegExp(
         q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
         "i",
@@ -302,22 +326,43 @@ const getAllToursFactory = getAll(Tour, {
       ];
     }
 
-    if (minPrice || maxPrice) {
+    /* ---------- Price ---------- */
+    const minP = toNum(minPrice);
+    const maxP = toNum(maxPrice);
+
+    if (minP !== undefined || maxP !== undefined) {
       newFilter.price = {};
-      if (minPrice) newFilter.price.$gte = parseInt(minPrice, 10);
-      if (maxPrice) newFilter.price.$lte = parseInt(maxPrice, 10);
+      if (minP !== undefined) newFilter.price.$gte = minP;
+      if (maxP !== undefined) newFilter.price.$lte = maxP;
     }
 
-    if (minRating || maxRating) {
+    /* ---------- Rating ---------- */
+    const minR = toNum(minRating);
+    const maxR = toNum(maxRating);
+
+    if (minR !== undefined || maxR !== undefined) {
       newFilter.ratingsAverage = {};
-      if (minRating) newFilter.ratingsAverage.$gte = parseFloat(minRating);
-      if (maxRating) newFilter.ratingsAverage.$lte = parseFloat(maxRating);
+      if (minR !== undefined) newFilter.ratingsAverage.$gte = minR;
+      if (maxR !== undefined) newFilter.ratingsAverage.$lte = maxR;
     }
 
-    if (startDate || endDate) {
+    /* ---------- Max duration (days) ---------- */
+    const maxD = toNum(maxDuration);
+
+    if (maxD !== undefined && maxD > 0) {
+      newFilter.duration = { $lte: maxD };
+    }
+
+    /* ---------- Start dates ---------- */
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    const validStart = start && !Number.isNaN(start.getTime());
+    const validEnd = end && !Number.isNaN(end.getTime());
+
+    if (validStart || validEnd) {
       newFilter.startDates = {};
-      if (startDate) newFilter.startDates.$gte = new Date(startDate);
-      if (endDate) newFilter.startDates.$lte = new Date(endDate);
+      if (validStart) newFilter.startDates.$gte = start;
+      if (validEnd) newFilter.startDates.$lte = end;
     }
 
     return newFilter;
