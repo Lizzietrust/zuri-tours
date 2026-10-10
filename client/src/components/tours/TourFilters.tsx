@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { TourFilters as Filters } from "@/types";
 
 interface TourFiltersProps {
@@ -10,34 +17,72 @@ interface TourFiltersProps {
 }
 
 const DIFFICULTIES = [
-  { value: "", label: "Any difficulty" },
+  { value: "", label: "Any" },
   { value: "easy", label: "Easy" },
   { value: "medium", label: "Medium" },
   { value: "difficult", label: "Difficult" },
 ];
 
-const SORTS = [
-  { value: "-createdAt", label: "Newest first" },
-  { value: "price", label: "Price: low → high" },
-  { value: "-price", label: "Price: high → low" },
-  { value: "-ratingsAverage", label: "Highest rated" },
-  { value: "duration", label: "Shortest duration" },
-  { value: "-duration", label: "Longest duration" },
-  { value: "name", label: "Name A → Z" },
+const RATINGS = [
+  { value: "", label: "Any" },
+  { value: "3", label: "3+" },
+  { value: "4", label: "4+" },
+  { value: "4.5", label: "4.5+" },
 ];
 
-const RATINGS = [
-  { value: "", label: "Any rating" },
-  { value: "4.5", label: "4.5+ stars" },
-  { value: "4", label: "4+ stars" },
-  { value: "3", label: "3+ stars" },
-];
+const inputClass =
+  "w-full rounded-xl border border-gray-200 bg-white py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100";
+
+function Pill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 ${
+        active
+          ? "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+          : "border-gray-200 bg-white text-gray-700 hover:border-emerald-300 hover:bg-emerald-50"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Section({
+  title,
+  children,
+  first = false,
+}: {
+  title: string;
+  children: ReactNode;
+  first?: boolean;
+}) {
+  return (
+    <div className={first ? "" : "border-t border-gray-100 pt-5"}>
+      <h3 className="mb-3 text-xs font-semibold tracking-wide text-gray-500 uppercase">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
 
 export default function TourFilters({
   filters,
   onChange,
   onReset,
 }: TourFiltersProps) {
+  const uid = useId();
   const [local, setLocal] = useState<Filters>(filters);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -71,177 +116,197 @@ export default function TourFilters({
   }, []);
 
   const setDebounced = (patch: Partial<Filters>) => {
-    const next = { ...local, ...patch };
+    const next = { ...filters, ...local, ...patch };
     setLocal(next);
     schedulePush(next);
   };
 
   const setImmediate = (patch: Partial<Filters>) => {
-    const next = { ...local, ...patch };
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    const next = { ...filters, ...local, ...patch };
     setLocal(next);
     lastExternal.current = JSON.stringify(next);
     onChange(next);
   };
 
   const activeCount = [
-    filters.q,
     filters.difficulty,
     filters.minPrice,
     filters.maxPrice,
     filters.minRating,
     filters.maxDuration,
-    filters.category,
   ].filter(Boolean).length;
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between lg:hidden">
+      {/* Mobile toggle */}
+      <div className="mb-4 lg:hidden">
         <button
           type="button"
           onClick={() => setMobileOpen((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          aria-expanded={mobileOpen}
+          className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 shadow-sm"
         >
-          <span>Filters</span>
-          {activeCount > 0 && (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-xs font-semibold text-white">
-              {activeCount}
-            </span>
-          )}
-        </button>
-        {activeCount > 0 && (
-          <button
-            type="button"
-            onClick={onReset}
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
+          <span className="inline-flex items-center gap-2">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4 text-emerald-600"
+              aria-hidden="true"
+            >
+              <path d="M3 5h18M6 12h12M10 19h4" />
+            </svg>
+            Filters
+            {activeCount > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-xs font-bold text-white">
+                {activeCount}
+              </span>
+            )}
+          </span>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`h-4 w-4 text-gray-400 transition-transform ${mobileOpen ? "rotate-180" : ""}`}
+            aria-hidden="true"
           >
-            Clear all
-          </button>
-        )}
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       </div>
 
       <aside
-        className={`${
-          mobileOpen ? "block" : "hidden"
-        } lg:block lg:sticky lg:top-6 lg:self-start`}
+        className={`${mobileOpen ? "block" : "hidden"} lg:sticky lg:top-24 lg:block lg:self-start`}
       >
         <div className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+            <h2 className="inline-flex items-center gap-2 text-base font-bold text-gray-900">
               Filters
+              {activeCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-100 px-1.5 text-xs font-bold text-emerald-800">
+                  {activeCount}
+                </span>
+              )}
             </h2>
             {activeCount > 0 && (
               <button
                 type="button"
                 onClick={onReset}
-                className="hidden text-xs font-medium text-emerald-700 hover:text-emerald-800 lg:inline"
+                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
               >
                 Clear all
               </button>
             )}
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Search
-            </label>
-            <input
-              type="search"
-              value={local.q}
-              onChange={(e) => setDebounced({ q: e.target.value })}
-              placeholder="Tour name, location…"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Difficulty
-            </label>
-            <select
-              value={local.difficulty}
-              onChange={(e) => setImmediate({ difficulty: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            >
+          <Section title="Difficulty" first>
+            <div className="flex flex-wrap gap-2">
               {DIFFICULTIES.map((d) => (
-                <option key={d.value} value={d.value}>
+                <Pill
+                  key={d.value || "any"}
+                  active={local.difficulty === d.value}
+                  onClick={() => setImmediate({ difficulty: d.value })}
+                >
                   {d.label}
-                </option>
+                </Pill>
               ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Price range
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                value={local.minPrice}
-                onChange={(e) => setDebounced({ minPrice: e.target.value })}
-                placeholder="Min"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-              />
-              <span className="text-gray-400">–</span>
-              <input
-                type="number"
-                min={0}
-                value={local.maxPrice}
-                onChange={(e) => setDebounced({ maxPrice: e.target.value })}
-                placeholder="Max"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-              />
             </div>
-          </div>
+          </Section>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Minimum rating
-            </label>
-            <select
-              value={local.minRating}
-              onChange={(e) => setImmediate({ minRating: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            >
+          <Section title="Price range">
+            <div className="flex items-center gap-2">
+              <div className="relative w-full">
+                <label htmlFor={`${uid}-min`} className="sr-only">
+                  Minimum price
+                </label>
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-gray-400">
+                  $
+                </span>
+                <input
+                  id={`${uid}-min`}
+                  type="number"
+                  min={0}
+                  inputMode="numeric"
+                  value={local.minPrice}
+                  onChange={(e) => setDebounced({ minPrice: e.target.value })}
+                  placeholder="Min"
+                  className={`${inputClass} pr-3 pl-7`}
+                />
+              </div>
+              <span className="text-gray-300" aria-hidden>
+                –
+              </span>
+              <div className="relative w-full">
+                <label htmlFor={`${uid}-max`} className="sr-only">
+                  Maximum price
+                </label>
+                <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-gray-400">
+                  $
+                </span>
+                <input
+                  id={`${uid}-max`}
+                  type="number"
+                  min={0}
+                  inputMode="numeric"
+                  value={local.maxPrice}
+                  onChange={(e) => setDebounced({ maxPrice: e.target.value })}
+                  placeholder="Max"
+                  className={`${inputClass} pr-3 pl-7`}
+                />
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Minimum rating">
+            <div className="flex flex-wrap gap-2">
               {RATINGS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
+                <Pill
+                  key={r.value || "any"}
+                  active={local.minRating === r.value}
+                  onClick={() => setImmediate({ minRating: r.value })}
+                >
+                  {r.value ? (
+                    <>
+                      <span className="text-amber-400" aria-hidden>
+                        ★
+                      </span>{" "}
+                      {r.label}
+                    </>
+                  ) : (
+                    r.label
+                  )}
+                </Pill>
               ))}
-            </select>
-          </div>
+            </div>
+          </Section>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Max duration (days)
-            </label>
-            <input
-              type="number"
-              min={1}
-              value={local.maxDuration}
-              onChange={(e) => setDebounced({ maxDuration: e.target.value })}
-              placeholder="e.g. 7"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Sort by
-            </label>
-            <select
-              value={local.sort}
-              onChange={(e) => setImmediate({ sort: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-            >
-              {SORTS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Section title="Max duration">
+            <div className="relative">
+              <label htmlFor={`${uid}-dur`} className="sr-only">
+                Maximum duration in days
+              </label>
+              <input
+                id={`${uid}-dur`}
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={local.maxDuration}
+                onChange={(e) => setDebounced({ maxDuration: e.target.value })}
+                placeholder="e.g. 7"
+                className={`${inputClass} pr-14 pl-3`}
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-medium text-gray-400">
+                days
+              </span>
+            </div>
+          </Section>
         </div>
       </aside>
     </>
