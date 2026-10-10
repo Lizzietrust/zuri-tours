@@ -9,10 +9,12 @@ interface Props {
 }
 
 interface Chip {
-  key: keyof TourFilters;
+  id: string;
   label: string;
-  clearTo: string;
+  clear: Partial<TourFilters>;
 }
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function ActiveFilterChips({
   filters,
@@ -22,69 +24,83 @@ export default function ActiveFilterChips({
   const chips: Chip[] = [];
 
   if (filters.q) {
-    chips.push({ key: "q", label: `"${filters.q}"`, clearTo: "" });
+    chips.push({ id: "q", label: `“${filters.q}”`, clear: { q: "" } });
+  }
+  if (filters.category) {
+    chips.push({
+      id: "category",
+      label: cap(filters.category),
+      clear: { category: "" },
+    });
   }
   if (filters.difficulty) {
     chips.push({
-      key: "difficulty",
-      label: filters.difficulty,
-      clearTo: "",
+      id: "difficulty",
+      label: cap(filters.difficulty),
+      clear: { difficulty: "" },
     });
   }
   if (filters.minPrice || filters.maxPrice) {
-    const label = `$${filters.minPrice || "0"} – $${filters.maxPrice || "∞"}`;
-    chips.push({ key: "minPrice", label, clearTo: "" });
+    chips.push({
+      id: "price",
+      label: `$${filters.minPrice || "0"} – ${filters.maxPrice ? `$${filters.maxPrice}` : "any"}`,
+      clear: { minPrice: "", maxPrice: "" },
+    });
   }
   if (filters.minRating) {
     chips.push({
-      key: "minRating",
-      label: `${filters.minRating}★+`,
-      clearTo: "",
+      id: "rating",
+      label: `★ ${filters.minRating}+`,
+      clear: { minRating: "" },
     });
   }
   if (filters.maxDuration) {
     chips.push({
-      key: "maxDuration",
-      label: `≤ ${filters.maxDuration} days`,
-      clearTo: "",
+      id: "duration",
+      label: `≤ ${filters.maxDuration} ${filters.maxDuration === "1" ? "day" : "days"}`,
+      clear: { maxDuration: "" },
     });
-  }
-  if (filters.category) {
-    chips.push({ key: "category", label: filters.category, clearTo: "" });
   }
 
   if (chips.length === 0) return null;
 
-  const remove = (chip: Chip) => {
-    if (chip.key === "minPrice") {
-      onChange({ ...filters, minPrice: "", maxPrice: "" });
-    } else {
-      onChange({ ...filters, [chip.key]: chip.clearTo });
-    }
-  };
-
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-2">
+    <div
+      className="mb-5 flex flex-wrap items-center gap-2"
+      role="group"
+      aria-label="Active filters"
+    >
       {chips.map((chip) => (
         <span
-          key={chip.key}
-          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800"
+          key={chip.id}
+          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white py-1 pr-1.5 pl-3 text-xs font-semibold text-emerald-800 shadow-sm"
         >
           {chip.label}
           <button
             type="button"
-            onClick={() => remove(chip)}
-            aria-label={`Remove ${chip.label}`}
-            className="ml-1 rounded-full text-emerald-700 hover:text-emerald-900"
+            onClick={() => onChange({ ...filters, ...chip.clear })}
+            aria-label={`Remove filter ${chip.label}`}
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-100 hover:text-emerald-900 focus-visible:outline-2 focus-visible:outline-emerald-600"
           >
-            ×
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              className="h-3 w-3"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
           </button>
         </span>
       ))}
+
       <button
         type="button"
         onClick={onReset}
-        className="text-xs font-medium text-gray-500 hover:text-gray-700"
+        className="ml-1 text-xs font-semibold text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline"
       >
         Clear all
       </button>
