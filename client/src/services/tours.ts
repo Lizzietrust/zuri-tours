@@ -1,15 +1,27 @@
 import { api } from "@/lib/api";
+import { distanceKm, getTourCoords, type LatLng } from "@/lib/geo";
 import type { Tour, TourQueryParams } from "@/types";
 
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_ORIGIN ??
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v\d+\/?$/, "");
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v\d+\/?$/, "") ??
+  "";
 
 export const imageUrl = (filename?: string) => {
   if (!filename) return "/placeholder-tour.jpg";
   if (filename === "default.jpg") return "/placeholder-tour.jpg";
   if (filename.startsWith("http")) return filename;
   return `${API_ORIGIN}/img/tours/${filename}`;
+};
+
+/* ============================================================
+   Types
+   ============================================================ */
+
+type BackendListData = {
+  tours: Tour[];
+  center?: { lat: number; lng: number };
+  radius?: { value?: number; unit?: string; meters?: number };
 };
 
 type BackendListResponse = {
@@ -19,7 +31,7 @@ type BackendListResponse = {
   page?: number;
   pages?: number;
   limit?: number;
-  data: { tours: Tour[] } | Tour[];
+  data: BackendListData | Tour[];
 };
 
 type BackendSingleResponse = {
@@ -42,6 +54,38 @@ export type TourSingleResult = {
   status: string;
   data: { tour: Tour };
 };
+
+export type NearbySort = "distance" | "price" | "ratingsAverage" | "duration";
+
+export interface NearbyTourParams {
+  lat: number;
+  lng: number;
+  /** Search radius in km */
+  radius: number;
+  sortBy?: NearbySort;
+  difficulty?: string;
+  category?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  maxDuration?: number;
+  page?: number;
+  limit?: number;
+}
+
+export interface NearbyTourResult {
+  status: string;
+  tours: Tour[];
+  total: number;
+  page: number;
+  pages: number;
+  center?: { lat: number; lng: number };
+  radius?: { value?: number; unit?: string; meters?: number };
+}
+
+/* ============================================================
+   Helpers
+   ============================================================ */
 
 function extractTours(raw: BackendListResponse): Tour[] {
   if (Array.isArray(raw.data)) return raw.data;
@@ -68,6 +112,33 @@ function extractTour(raw: BackendSingleResponse | null): Tour | null {
   return null;
 }
 
+/**
+ * Normalise the distance on a tour to kilometres so the UI never has to guess
+ * the unit. Prefers the backend's `distanceInMeters`; falls back to computing
+ * it from the tour's coordinates.
+ */
+function withDistanceKm(tour: Tour, origin: LatLng): Tour {
+  let km: number | undefined;
+
+  if (
+    typeof tour.distanceInMeters === "number" &&
+    Number.isFinite(tour.distanceInMeters)
+  ) {
+    km = tour.distanceInMeters / 1000;
+  } else {
+    const coords = getTourCoords(tour.location);
+    if (coords) km = distanceKm(origin, coords);
+  }
+
+  return km === undefined
+    ? tour
+    : { ...tour, distance: km, distanceUnit: "km" };
+}
+
+/* ============================================================
+   Service
+   ============================================================ */
+
 export const tourService = {
   async getAll(params: TourQueryParams = {}): Promise<TourListResult> {
     const { data } = await api.get<BackendListResponse>("/tours", { params });
@@ -82,6 +153,44 @@ export const tourService = {
       pages: data.pages ?? 1,
       limit: data.limit ?? tours.length,
       data: { tours },
+    };
+  },
+
+  /**
+   * Geo search. The backend does the filtering, sorting and pagination
+   * (`GET /tours?lat&lng&radius&unit&sortBy&page&limit`).
+   */
+  async getNearby(params: NearbyTourParams): Promise<NearbyTourResult> {
+    const { data } = await api.get<BackendListResponse>("/tours", {
+      params: {
+        lat: params.lat,
+        lng: params.lng,
+        radius: params.radius,
+        unit: "km",
+        sortBy: params.sortBy ?? "distance",
+        difficulty: params.difficulty || undefined,
+        category: params.category || undefined,
+        minPrice: params.minPrice,
+        maxPrice: params.maxPrice,
+        minRating: params.minRating,
+        maxDuration: params.maxDuration,
+        page: params.page ?? 1,
+        limit: params.limit ?? 9,
+      },
+    });
+
+    const origin: LatLng = { lat: params.lat, lng: params.lng };
+    const tours = extractTours(data).map((t) => withDistanceKm(t, origin));
+    const details = Array.isArray(data.data) ? undefined : data.data;
+
+    return {
+      status: data.status,
+      tours,
+      total: data.total ?? tours.length,
+      page: data.page ?? 1,
+      pages: data.pages ?? 1,
+      center: details?.center,
+      radius: details?.radius,
     };
   },
 
