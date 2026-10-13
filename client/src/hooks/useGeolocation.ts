@@ -18,25 +18,36 @@ interface State {
   error?: string;
 }
 
+const DEFAULT_OPTIONS: PositionOptions = {
+  enableHighAccuracy: false,
+  timeout: 15_000,
+  maximumAge: 5 * 60_000,
+};
+
 export function useGeolocation(options?: PositionOptions) {
-  const [state, setState] = useState<State>({
-    status: "idle",
-    coords: null,
-  });
+  const [state, setState] = useState<State>({ status: "idle", coords: null });
 
   const optsRef = useRef<PositionOptions | undefined>(options);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     optsRef.current = options;
   }, [options]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const request = useCallback(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
-      setState({
+      setState((s) => ({
+        ...s,
         status: "error",
-        coords: null,
         error: "Geolocation is not supported by your browser.",
-      });
+      }));
       return;
     }
 
@@ -44,54 +55,90 @@ export function useGeolocation(options?: PositionOptions) {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (!mountedRef.current) return;
         setState({
           status: "granted",
-          coords: {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          },
+          coords: { lat: pos.coords.latitude, lng: pos.coords.longitude },
           accuracy: pos.coords.accuracy,
         });
       },
       (err) => {
+        if (!mountedRef.current) return;
+
         const denied = err.code === err.PERMISSION_DENIED;
-        setState({
+        const message = denied
+          ? "Location permission denied."
+          : err.code === err.TIMEOUT
+            ? "Finding your location took too long."
+            : "Your location is currently unavailable.";
+
+        setState((s) => ({
+          ...s,
           status: denied ? "denied" : "error",
-          coords: null,
-          error: denied
-            ? "Location permission denied."
-            : err.message || "Failed to get your location.",
-        });
+          error: message,
+        }));
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10_000,
-        maximumAge: 60_000,
-        ...optsRef.current,
-      },
+      { ...DEFAULT_OPTIONS, ...optsRef.current },
     );
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!("permissions" in navigator)) return;
+    if (typeof navigator === "undefined") return;
 
     let cancelled = false;
+    let permission: PermissionStatus | null = null;
 
-    navigator.permissions
-      .query({ name: "geolocation" as PermissionName })
-      .then((p) => {
+    const markPrompt = () =>
+      setState((s) => (s.status === "idle" ? { ...s, status: "prompt" } : s));
+
+    const sync = (p: PermissionStatus) => {
+      if (cancelled) return;
+
+      if (p.state === "granted") {
+        request();
+      } else if (p.state === "denied") {
+        setState((s) => ({
+          ...s,
+          status: "denied",
+          error: "Location permission denied.",
+        }));
+      } else {
+        setState((s) =>
+          s.status === "idle" || s.status === "denied"
+            ? { ...s, status: "prompt", error: undefined }
+            : s,
+        );
+      }
+    };
+
+    const init = async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+
+      if (!("permissions" in navigator)) {
+        markPrompt();
+        return;
+      }
+
+      try {
+        const p = await navigator.permissions.query({
+          name: "geolocation" as PermissionName,
+        });
         if (cancelled) return;
-        if (p.state === "granted") {
-          request();
-        } else if (p.state === "prompt" || p.state === "denied") {
-          setState((s) => ({ ...s, status: p.state as Status }));
-        }
-      })
-      .catch(() => {});
+
+        permission = p;
+        sync(p);
+        p.onchange = () => sync(p);
+      } catch {
+        if (!cancelled) markPrompt();
+      }
+    };
+
+    init();
 
     return () => {
       cancelled = true;
+      if (permission) permission.onchange = null;
     };
   }, [request]);
 
