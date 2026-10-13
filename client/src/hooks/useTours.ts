@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { tourService } from "@/services/tours";
+import { tourService, type NearbyTourParams } from "@/services/tours";
 import type { TourQueryParams } from "@/types";
 
 function stableKey(params: TourQueryParams): string {
@@ -16,10 +16,28 @@ function stableKey(params: TourQueryParams): string {
   );
 }
 
-export function useTours(params: TourQueryParams) {
+export function useTours(
+  params: TourQueryParams,
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: ["tours", stableKey(params)],
     queryFn: () => tourService.getAll(params),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
+ * Tours near a point, filtered / sorted / paginated by the backend.
+ * Pass `null` until the user's location is known — the query stays idle.
+ */
+export function useNearbyTours(params: NearbyTourParams | null) {
+  return useQuery({
+    queryKey: ["tours", "nearby", params],
+    queryFn: () => tourService.getNearby(params as NearbyTourParams),
+    enabled: params !== null,
     staleTime: 60_000,
     placeholderData: keepPreviousData,
   });
@@ -39,5 +57,6 @@ export function useFeaturedTours(limit = 3) {
     queryKey: ["tours", "featured", limit],
     queryFn: () => tourService.getFeatured(limit),
     staleTime: 1000 * 60 * 5,
+    retry: 1,
   });
 }
