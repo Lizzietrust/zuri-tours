@@ -10,14 +10,16 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTours } from "@/hooks/useTours";
+import { useTours, useToursByLocation } from "@/hooks/useTours";
 import TourCard from "@/components/tours/TourCard";
 import TourCardSkeleton from "@/components/tours/TourCardSkeleton";
 import TourFilters from "@/components/tours/TourFilters";
 import ActiveFilterChips from "@/components/tours/ActiveFilterChips";
+import Pagination from "@/components/ui/Pagination";
 import type { Tour, TourFilters as Filters, TourQueryParams } from "@/types";
 
 const PAGE_SIZE = 9;
+const LOCATION_RADIUS = 100;
 
 const DEFAULT_FILTERS: Filters = {
   q: "",
@@ -70,12 +72,17 @@ function parsePage(search: string): number {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
-function buildUrl(filters: Filters, page = 1): string {
+function parseLocation(search: string): string {
+  return new URLSearchParams(search).get("location") ?? "";
+}
+
+function buildUrl(filters: Filters, page = 1, location = ""): string {
   const sp = new URLSearchParams();
   for (const key of FILTER_KEYS) {
     const value = filters[key];
     if (value !== "" && value !== DEFAULT_FILTERS[key]) sp.set(key, value);
   }
+  if (location) sp.set("location", location);
   if (page > 1) sp.set("page", String(page));
   const qs = sp.toString();
   return qs ? `/tours?${qs}` : "/tours";
@@ -105,6 +112,27 @@ function toQueryParams(filters: Filters): TourQueryParams {
     params.maxDuration = maxDuration;
 
   return params;
+}
+
+/** Same filters, but shaped for the nearby/geo endpoint. */
+function toNearbyParams(filters: Filters, page: number) {
+  const num = (v: string) =>
+    v !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined;
+
+  return {
+    radius: LOCATION_RADIUS,
+    difficulty: filters.difficulty || undefined,
+    category: filters.category || undefined,
+    minPrice: num(filters.minPrice),
+    maxPrice: num(filters.maxPrice),
+    minRating: num(filters.minRating),
+    maxDuration: num(filters.maxDuration),
+    sortBy: (["price", "ratingsAverage", "duration"].includes(filters.sort)
+      ? filters.sort
+      : "distance") as "distance" | "price" | "ratingsAverage" | "duration",
+    page,
+    limit: PAGE_SIZE,
+  };
 }
 
 /** Safety net for filters the backend list endpoint may not apply. */
@@ -153,48 +181,83 @@ function applyClientFilters(tours: Tour[], filters: Filters): Tour[] {
 /* ---------- Small UI pieces ---------- */
 
 function SearchBar({
-  initial,
+  initialQ,
+  initialLocation,
   onSearch,
 }: {
-  initial: string;
-  onSearch: (q: string) => void;
+  initialQ: string;
+  initialLocation: string;
+  onSearch: (q: string, location: string) => void;
 }) {
-  const [value, setValue] = useState(initial);
+  const [q, setQ] = useState(initialQ);
+  const [loc, setLoc] = useState(initialLocation);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onSearch(value.trim());
+    onSearch(q.trim(), loc.trim());
   };
 
   return (
     <form
       onSubmit={submit}
       role="search"
-      className="mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg shadow-emerald-900/5 focus-within:border-emerald-400 focus-within:ring-4 focus-within:ring-emerald-100"
+      className="mx-auto mt-8 flex max-w-2xl flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg shadow-emerald-900/5 focus-within:border-emerald-400 focus-within:ring-4 focus-within:ring-emerald-100 sm:flex-row sm:items-center"
     >
-      <label htmlFor="tours-search" className="sr-only">
-        Search tours
-      </label>
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        className="ml-2 h-5 w-5 shrink-0 text-gray-400"
-        aria-hidden="true"
-      >
-        <circle cx="11" cy="11" r="7" />
-        <path d="M21 21l-4.3-4.3" />
-      </svg>
-      <input
-        id="tours-search"
-        type="search"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Search destinations or tours…"
-        className="min-w-0 flex-1 bg-transparent px-1 py-2 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none"
-      />
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-2">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          className="h-5 w-5 shrink-0 text-gray-400"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.3-4.3" />
+        </svg>
+        <label htmlFor="tours-search" className="sr-only">
+          Search tours
+        </label>
+        <input
+          id="tours-search"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search tours, destinations…"
+          className="min-w-0 flex-1 bg-transparent py-2 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none"
+        />
+      </div>
+
+      <div className="hidden h-8 w-px bg-gray-200 sm:block" />
+
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-2">
+        <span aria-hidden className="text-gray-400">
+          📍
+        </span>
+        <label htmlFor="tours-location" className="sr-only">
+          Near location
+        </label>
+        <input
+          id="tours-location"
+          type="text"
+          value={loc}
+          onChange={(e) => setLoc(e.target.value)}
+          placeholder="Near… (e.g. Nairobi, Paris)"
+          className="min-w-0 flex-1 bg-transparent py-2 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none"
+        />
+        {loc && (
+          <button
+            type="button"
+            onClick={() => setLoc("")}
+            aria-label="Clear location"
+            className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
       <button
         type="submit"
         className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
@@ -202,82 +265,6 @@ function SearchBar({
         Search
       </button>
     </form>
-  );
-}
-
-function pageItems(current: number, total: number): (number | "…")[] {
-  const set = new Set<number>([1, total, current, current - 1, current + 1]);
-  const nums = [...set]
-    .filter((n) => n >= 1 && n <= total)
-    .sort((a, b) => a - b);
-  const out: (number | "…")[] = [];
-  nums.forEach((n, i) => {
-    if (i > 0 && n - nums[i - 1] > 1) out.push("…");
-    out.push(n);
-  });
-  return out;
-}
-
-function Pagination({
-  page,
-  pages,
-  onChange,
-}: {
-  page: number;
-  pages: number;
-  onChange: (page: number) => void;
-}) {
-  if (pages <= 1) return null;
-
-  const base =
-    "inline-flex h-10 min-w-10 items-center justify-center rounded-xl border px-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600";
-
-  return (
-    <nav
-      aria-label="Pagination"
-      className="mt-10 flex flex-wrap items-center justify-center gap-1.5"
-    >
-      <button
-        type="button"
-        onClick={() => onChange(page - 1)}
-        disabled={page <= 1}
-        className={`${base} border-gray-200 bg-white text-gray-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:border-gray-200 disabled:hover:bg-white`}
-      >
-        ← Prev
-      </button>
-
-      {pageItems(page, pages).map((item, i) =>
-        item === "…" ? (
-          <span key={`gap-${i}`} className="px-1 text-gray-400" aria-hidden>
-            …
-          </span>
-        ) : (
-          <button
-            key={item}
-            type="button"
-            onClick={() => onChange(item)}
-            aria-current={item === page ? "page" : undefined}
-            aria-label={`Page ${item}`}
-            className={`${base} ${
-              item === page
-                ? "border-emerald-600 bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-                : "border-gray-200 bg-white text-gray-700 hover:border-emerald-300 hover:bg-emerald-50"
-            }`}
-          >
-            {item}
-          </button>
-        ),
-      )}
-
-      <button
-        type="button"
-        onClick={() => onChange(page + 1)}
-        disabled={page >= pages}
-        className={`${base} border-gray-200 bg-white text-gray-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:border-gray-200 disabled:hover:bg-white`}
-      >
-        Next →
-      </button>
-    </nav>
   );
 }
 
@@ -291,10 +278,20 @@ function ToursContent() {
 
   const filters = useMemo(() => parseFilters(search), [search]);
   const page = useMemo(() => parsePage(search), [search]);
+  const locationQuery = useMemo(() => parseLocation(search), [search]);
+
+  const isLocationMode = locationQuery.trim().length >= 2;
 
   const setFilters = useCallback(
-    (next: Filters) => router.replace(buildUrl(next), { scroll: false }),
-    [router],
+    (next: Filters) =>
+      router.replace(buildUrl(next, 1, locationQuery), { scroll: false }),
+    [router, locationQuery],
+  );
+
+  const setLocation = useCallback(
+    (next: string) =>
+      router.replace(buildUrl(filters, 1, next.trim()), { scroll: false }),
+    [router, filters],
   );
 
   const handleReset = useCallback(
@@ -302,44 +299,83 @@ function ToursContent() {
     [router],
   );
 
+  const handleSearch = useCallback(
+    (q: string, loc: string) =>
+      router.replace(buildUrl({ ...filters, q }, 1, loc), { scroll: false }),
+    [router, filters],
+  );
+
   const goToPage = useCallback(
     (p: number) => {
-      router.replace(buildUrl(filters, p), { scroll: false });
+      router.replace(buildUrl(filters, p, locationQuery), { scroll: false });
       resultsRef.current?.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
     },
-    [router, filters],
+    [router, filters, locationQuery],
   );
 
-  const queryParams = useMemo<TourQueryParams>(
+  /* ---------- Data: geo mode vs list mode ---------- */
+
+  const listParams = useMemo<TourQueryParams>(
     () => ({ ...toQueryParams(filters), page, limit: PAGE_SIZE }),
     [filters, page],
   );
 
-  const { data, isLoading, isError, error, refetch, isFetching } =
-    useTours(queryParams);
-
-  const rawTours = useMemo<Tour[]>(
-    () => (data?.data?.tours ?? EMPTY_TOURS) as Tour[],
-    [data],
+  const nearbyParams = useMemo(
+    () => toNearbyParams(filters, page),
+    [filters, page],
   );
+
+  const listQuery = useTours(listParams, { enabled: !isLocationMode });
+  const geoQuery = useToursByLocation(
+    isLocationMode ? locationQuery : "",
+    nearbyParams,
+  );
+
+  const activeQuery = isLocationMode ? geoQuery : listQuery;
+
+  const rawTours = useMemo<Tour[]>(() => {
+    if (isLocationMode) return (geoQuery.data?.tours ?? EMPTY_TOURS) as Tour[];
+    return (listQuery.data?.data?.tours ?? EMPTY_TOURS) as Tour[];
+  }, [isLocationMode, geoQuery.data, listQuery.data]);
+
   const tours = useMemo(
     () => applyClientFilters(rawTours, filters),
     [rawTours, filters],
   );
 
-  const total = data?.total ?? rawTours.length;
-  const pages = data?.pages ?? 1;
+  const total = isLocationMode
+    ? (geoQuery.data?.total ?? rawTours.length)
+    : (listQuery.data?.total ?? rawTours.length);
+
+  const pages = isLocationMode
+    ? (geoQuery.data?.pages ?? 1)
+    : (listQuery.data?.pages ?? 1);
+
+  const isLoading = activeQuery.isLoading;
+  const isError = activeQuery.isError;
+  const isFetching = activeQuery.isFetching;
+
   const from = (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
 
   const errorMessage =
-    (error as { message?: string } | null)?.message ||
+    (activeQuery.error as { message?: string } | null)?.message ||
     "An unexpected error occurred.";
 
   const isFiltered = FILTER_KEYS.some((k) => k !== "sort" && filters[k] !== "");
+
+  const geoCenter = geoQuery.data?.center;
+
+  /* ✅ FIX — only build the coordinate label when both lat/lng are finite numbers */
+  const geoCenterLabel =
+    geoCenter &&
+    Number.isFinite(geoCenter.lat) &&
+    Number.isFinite(geoCenter.lng)
+      ? `(${geoCenter.lat.toFixed(3)}, ${geoCenter.lng.toFixed(3)})`
+      : null;
 
   return (
     <div className="min-h-screen">
@@ -364,7 +400,14 @@ function ToursContent() {
           </span>
 
           <h1 className="mt-6 text-3xl font-extrabold tracking-tight text-balance text-gray-900 sm:text-5xl">
-            {filters.q ? (
+            {locationQuery ? (
+              <>
+                Tours near{" "}
+                <span className="bg-linear-to-r from-emerald-600 to-sky-600 bg-clip-text text-transparent">
+                  {locationQuery}
+                </span>
+              </>
+            ) : filters.q ? (
               <>
                 Results for{" "}
                 <span className="bg-linear-to-r from-emerald-600 to-sky-600 bg-clip-text text-transparent">
@@ -382,15 +425,15 @@ function ToursContent() {
           </h1>
 
           <p className="mx-auto mt-4 max-w-2xl text-lg text-pretty text-gray-600">
-            Handpicked tours around the world — filter by difficulty, price, and
-            rating to find your perfect trip.
+            Handpicked tours around the world — search by destination, or add a
+            location to sort by distance.
           </p>
 
-          {/* key remounts the bar when q changes elsewhere (chips, reset) */}
           <SearchBar
-            key={filters.q}
-            initial={filters.q}
-            onSearch={(q) => setFilters({ ...filters, q })}
+            key={`${filters.q}|${locationQuery}`}
+            initialQ={filters.q}
+            initialLocation={locationQuery}
+            onSearch={handleSearch}
           />
 
           {/* Category quick filters */}
@@ -419,6 +462,24 @@ function ToursContent() {
               );
             })}
           </div>
+
+          {/* Active location pill */}
+          {isLocationMode && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setLocation("")}
+                className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-emerald-800 backdrop-blur hover:bg-emerald-50"
+              >
+                📍 Near: {locationQuery}
+                {/* ✅ FIX — use the precomputed safe label */}
+                {geoCenterLabel && (
+                  <span className="text-emerald-600/70">{geoCenterLabel}</span>
+                )}
+                <span aria-hidden>✕</span>
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -437,7 +498,9 @@ function ToursContent() {
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-gray-600" aria-live="polite">
                   {isLoading
-                    ? "Loading tours…"
+                    ? isLocationMode
+                      ? `Finding tours near ${locationQuery}…`
+                      : "Loading tours…"
                     : tours.length > 0
                       ? `Showing ${from}–${to} of ${total} ${total === 1 ? "tour" : "tours"}`
                       : ""}
@@ -483,17 +546,30 @@ function ToursContent() {
                 >
                   <span>
                     <span className="font-semibold">
-                      We couldn&apos;t load tours right now.
+                      {isLocationMode
+                        ? `We couldn't find tours near "${locationQuery}".`
+                        : "We couldn't load tours right now."}
                     </span>{" "}
                     {errorMessage}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => refetch()}
-                    className="rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
-                  >
-                    Try again
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => activeQuery.refetch()}
+                      className="rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
+                    >
+                      Try again
+                    </button>
+                    {isLocationMode && (
+                      <button
+                        type="button"
+                        onClick={() => setLocation("")}
+                        className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-50"
+                      >
+                        Clear location
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -511,27 +587,31 @@ function ToursContent() {
               {!isLoading && !isError && tours.length === 0 && (
                 <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
                   <span className="text-4xl" aria-hidden>
-                    {isFiltered ? "🔍" : "🧭"}
+                    {isLocationMode ? "🗺️" : isFiltered ? "🔍" : "🧭"}
                   </span>
                   <h2 className="mt-3 text-lg font-semibold text-gray-900">
-                    {filters.q
-                      ? `No tours found for “${filters.q}”`
-                      : isFiltered
-                        ? "No tours match your filters"
-                        : "No tours yet"}
+                    {isLocationMode
+                      ? `No tours within ${LOCATION_RADIUS} km of ${locationQuery}`
+                      : filters.q
+                        ? `No tours found for "${filters.q}"`
+                        : isFiltered
+                          ? "No tours match your filters"
+                          : "No tours yet"}
                   </h2>
                   <p className="mt-1 max-w-md text-sm text-gray-600">
-                    {isFiltered
-                      ? "Try a different keyword, widen your price range, or clear a filter."
-                      : "We haven't published any tours. Check back soon."}
+                    {isLocationMode
+                      ? "Try a different city, or widen your filters."
+                      : isFiltered
+                        ? "Try a different keyword, widen your price range, or clear a filter."
+                        : "We haven't published any tours. Check back soon."}
                   </p>
-                  {isFiltered && (
+                  {(isFiltered || isLocationMode) && (
                     <button
                       type="button"
                       onClick={handleReset}
                       className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
                     >
-                      Clear all filters
+                      Clear all
                     </button>
                   )}
                 </div>
