@@ -13,6 +13,7 @@ import tourRouter from "./routes/tourRoutes.js";
 import reviewRouter from "./routes/reviewRoutes.js";
 import userRouter from "./routes/userRoutes.js";
 import authRouter from "./routes/authRoutes.js";
+import geocodeRouter from "./routes/geocodeRoutes.js";
 
 import {
   generalLimiter,
@@ -189,6 +190,7 @@ app.use(`${API_VERSION}/auth`, authRouter);
 app.use(`${API_VERSION}/tours`, tourRouter);
 app.use(`${API_VERSION}/reviews`, reviewRouter);
 app.use(`${API_VERSION}/users`, userRouter);
+app.use(`${API_VERSION}/geocode`, geocodeRouter);
 
 /* ---------- Health check ---------- */
 
@@ -253,6 +255,7 @@ app.get("/", (req, res) => {
       users: `${API_VERSION}/users`,
       tours: `${API_VERSION}/tours`,
       reviews: `${API_VERSION}/reviews`,
+      geocode: `${API_VERSION}/geocode`,
       health: "/health",
     },
     rateLimiting: {
@@ -345,6 +348,7 @@ const server = app.listen(PORT, () => {
   console.log(`   - Users:   ${API_VERSION}/users`);
   console.log(`   - Tours:   ${API_VERSION}/tours`);
   console.log(`   - Reviews: ${API_VERSION}/reviews`);
+  console.log(`   - Geocode: ${API_VERSION}/geocode`);
   console.log(`   - Health:  /health`);
   console.log(`   - Images:  /img/tours/*`);
 });
