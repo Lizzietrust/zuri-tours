@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import { distanceKm, getTourCoords, type LatLng } from "@/lib/geo";
+import { geocodeService } from "@/services/geocode";
 import type { Tour, TourQueryParams } from "@/types";
 
 const API_ORIGIN =
@@ -60,8 +61,13 @@ export type NearbySort = "distance" | "price" | "ratingsAverage" | "duration";
 export interface NearbyTourParams {
   lat: number;
   lng: number;
-  /** Search radius in km */
-  radius: number;
+  /**
+   * Search radius in km.
+   * Defaults applied by the service: 100 for place-name search, 50 for
+   * direct lat/lng. Marked optional so callers (e.g. `useToursByLocation`)
+   * can omit it and rely on the defaults.
+   */
+  radius?: number;
   sortBy?: NearbySort;
   difficulty?: string;
   category?: string;
@@ -165,7 +171,7 @@ export const tourService = {
       params: {
         lat: params.lat,
         lng: params.lng,
-        radius: params.radius,
+        radius: params.radius ?? 50,
         unit: "km",
         sortBy: params.sortBy ?? "distance",
         difficulty: params.difficulty || undefined,
@@ -223,6 +229,28 @@ export const tourService = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Search by a place name (geocoded server-side) OR raw coords.
+   * Returns the same shape as getNearby so the map/list can consume it.
+   *
+   * Note: `radius` is destructured out of `params` before spreading so an
+   * explicit `radius: undefined` from the caller can't clobber the default.
+   */
+  async getByLocation(
+    query: string,
+    params: Omit<NearbyTourParams, "lat" | "lng"> = {},
+  ): Promise<NearbyTourResult> {
+    const place = await geocodeService.search(query);
+    const { radius, ...rest } = params;
+
+    return this.getNearby({
+      ...rest,
+      lat: place.lat,
+      lng: place.lng,
+      radius: radius ?? 100,
+    });
   },
 };
 
