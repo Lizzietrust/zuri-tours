@@ -5,6 +5,7 @@ import { useId, type SyntheticEvent } from "react";
 import type { Tour } from "@/types";
 import { formatCurrency } from "@/lib/utils";
 import { imageUrl } from "@/services/tours";
+import { formatDistance } from "@/lib/geo";
 
 const FALLBACK_IMG = "/placeholder-tour.jpg";
 
@@ -129,6 +130,17 @@ export default function TourCard({ tour }: { tour: Tour }) {
   const city = tour.location?.city;
   const country = tour.location?.country;
 
+  /* Distance is only present when the query was geo-based
+     (near-me page or /tours?location=…) */
+  const hasDistance =
+    typeof tour.distance === "number" && Number.isFinite(tour.distance);
+
+  /* ✅ FIX — formatDistance() takes ONE argument (km).
+     It already appends the correct unit internally. */
+  const distanceLabel = hasDistance
+    ? `${formatDistance(tour.distance!)} away`
+    : null;
+
   const handleImgError = (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
     img.onerror = null;
@@ -162,6 +174,18 @@ export default function TourCard({ tour }: { tour: Tour }) {
         {hasDiscount && (
           <span className="absolute top-3 right-3 rounded-full bg-rose-500 px-2.5 py-0.5 text-xs font-bold text-white shadow-md">
             −{discountPercent}%
+          </span>
+        )}
+
+        {/* Distance pill — bottom-right on the image, glassy backdrop */}
+        {hasDistance && (
+          <span
+            className="absolute right-3 bottom-3 inline-flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 shadow-sm backdrop-blur"
+            title={distanceLabel ?? undefined}
+          >
+            <span aria-hidden>📍</span>
+            {/* ✅ FIX — single-argument call */}
+            {formatDistance(tour.distance!)}
           </span>
         )}
 
@@ -211,12 +235,10 @@ export default function TourCard({ tour }: { tour: Tour }) {
             </div>
           )}
 
-          {typeof tour.distance === "number" && (
+          {hasDistance && (
             <div className="col-span-2 flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span className="truncate">
-                {tour.distance.toFixed(1)} {tour.distanceUnit ?? "km"} away
-              </span>
+              <span className="truncate">{distanceLabel}</span>
             </div>
           )}
         </div>
