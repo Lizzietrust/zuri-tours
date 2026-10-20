@@ -15,8 +15,6 @@ import type { Tour } from "@/types";
 
 const FALLBACK_IMG = "/placeholder-tour.jpg";
 
-/* ---------- shared style maps (identical to TourCard) ---------- */
-
 const DIFFICULTY_STYLES: Record<Tour["difficulty"], string> = {
   easy: "bg-emerald-100 text-emerald-800 ring-emerald-200",
   medium: "bg-amber-100 text-amber-800 ring-amber-200",
@@ -28,8 +26,6 @@ const DIFFICULTY_LABEL: Record<Tour["difficulty"], string> = {
   medium: "Moderate",
   difficult: "Challenging",
 };
-
-/* ---------- icon helper (same as TourCard) ---------- */
 
 const ICONS = {
   clock: "M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z",
@@ -591,18 +587,23 @@ export default function TourDetailClient({ slug }: { slug: string }) {
 
             {/* Reviews — wrapped in the same card language as ToursPage */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-lg shadow-emerald-900/5">
-              <h2 className="text-xl font-bold text-gray-900">Reviews</h2>
+              <h2 className="text-2xl font-extrabold text-gray-900">
+                Traveler Reviews
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Read what others have to say, or share your own experience.
+              </p>
 
-              <div className="mt-5 grid gap-6 lg:grid-cols-3">
-                <aside className="lg:col-span-1">
+              <div className="mt-8 grid gap-8 lg:grid-cols-12">
+                <aside className="lg:col-span-4">
                   <RatingDistribution tourId={tour._id} />
                 </aside>
-                <div className="lg:col-span-2">
+                <div className="lg:col-span-8">
                   <ReviewForm tourId={tour._id} />
                 </div>
               </div>
 
-              <hr className="my-6 border-gray-100" />
+              <hr className="my-8 border-gray-100" />
 
               <ReviewList tourId={tour._id} />
             </div>
