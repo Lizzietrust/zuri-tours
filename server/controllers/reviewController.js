@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Review from "../models/Review.js";
 import Tour from "../models/Tour.js";
 import { catchAsync } from "../utils/catchAsync.js";
@@ -613,7 +614,7 @@ const flagReview = catchAsync(async (req, res) => {
   });
 });
 
-/* ---------- Stats ---------- */
+/* ---------- Stats (FIXED) ---------- */
 
 const getReviewStats = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
@@ -623,6 +624,10 @@ const getReviewStats = catchAsync(async (req, res) => {
       "Tour ID is required (provide :tourId in the path or ?tourId=...)",
       400,
     );
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(tourId)) {
+    throw new AppError("Invalid tour ID", 400);
   }
 
   const tour = await Tour.findById(tourId);
