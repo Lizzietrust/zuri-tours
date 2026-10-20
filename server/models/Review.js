@@ -42,7 +42,6 @@ const reviewSchema = new mongoose.Schema(
     },
 
     /* ---------- Post-moderation status ---------- */
-
     status: {
       type: String,
       enum: ["approved", "pending", "rejected", "flagged", "hidden"],
@@ -50,7 +49,6 @@ const reviewSchema = new mongoose.Schema(
     },
 
     /* ---------- Post-moderation audit ---------- */
-
     needsModeration: {
       type: Boolean,
       default: true,
@@ -109,33 +107,19 @@ const reviewSchema = new mongoose.Schema(
 
 /* ================================================================== */
 /*  INDEXES                                                           */
-/*  Every index declared exactly ONCE here.                           */
 /* ================================================================== */
 
-/* Unique: one review per user per tour */
 reviewSchema.index({ tour: 1, user: 1 }, { unique: true });
-
-/* Listing / sorting */
 reviewSchema.index({ tour: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, createdAt: -1 });
 reviewSchema.index({ rating: -1 });
 reviewSchema.index({ isVerifiedPurchase: 1 });
 reviewSchema.index({ createdAt: -1 });
 reviewSchema.index({ helpfulCount: -1 });
-
-/* Compound: status-filtered tour listing */
 reviewSchema.index({ tour: 1, status: 1, createdAt: -1 });
-
-/* Compound: per-user status listing (used by getMyReviews) */
 reviewSchema.index({ user: 1, status: 1 });
-
-/* Compound: top-rated with helpful tie-break */
 reviewSchema.index({ rating: -1, helpfulCount: -1 });
-
-/* Moderation queue */
 reviewSchema.index({ needsModeration: 1, createdAt: -1 });
-
-/* Full-text search */
 reviewSchema.index(
   { review: "text", title: "text" },
   {
@@ -420,11 +404,20 @@ reviewSchema.statics.getReviewedTourIds = async function getReviewedTourIds(
   return reviews.map((r) => r.tour);
 };
 
-/* --------------------------- Aggregate statics -------------------- */
+/* ================================================================== */
+/*  AGGREGATE STATICS — MUST cast tourId to ObjectId                   */
+/*  (Model.aggregate() does NOT auto-cast like Model.find() does)     */
+/* ================================================================== */
 
 reviewSchema.statics.getReviewStats = async function getReviewStats(tourId) {
+  if (!tourId || !mongoose.Types.ObjectId.isValid(tourId)) {
+    return null;
+  }
+
+  const tourObjectId = new mongoose.Types.ObjectId(tourId);
+
   const stats = await this.aggregate([
-    { $match: { tour: tourId, status: "approved" } },
+    { $match: { tour: tourObjectId, status: "approved" } },
     {
       $group: {
         _id: null,
@@ -489,8 +482,14 @@ reviewSchema.statics.getReviewStats = async function getReviewStats(tourId) {
 
 reviewSchema.statics.getRatingDistribution =
   async function getRatingDistribution(tourId) {
+    if (!tourId || !mongoose.Types.ObjectId.isValid(tourId)) {
+      return null;
+    }
+
+    const tourObjectId = new mongoose.Types.ObjectId(tourId);
+
     const distribution = await this.aggregate([
-      { $match: { tour: tourId, status: "approved" } },
+      { $match: { tour: tourObjectId, status: "approved" } },
       { $group: { _id: "$rating", count: { $sum: 1 } } },
       { $sort: { _id: -1 } },
       {
@@ -535,7 +534,9 @@ reviewSchema.statics.getReviewsByDateRange = function getReviewsByDateRange(
     status: "approved",
   };
 
-  if (tourId) match.tour = tourId;
+  if (tourId && mongoose.Types.ObjectId.isValid(tourId)) {
+    match.tour = new mongoose.Types.ObjectId(tourId);
+  }
 
   return this.aggregate([
     { $match: match },
