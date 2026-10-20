@@ -15,7 +15,14 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-4 rounded-xl border border-gray-200 p-6">
+        <div className="flex gap-4">
+          <Skeleton className="h-16 w-16" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+        </div>
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-4 w-full" />
         ))}
@@ -25,9 +32,11 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
 
   if (isError || !data) {
     return (
-      <p className="text-sm text-gray-500">
-        Couldn&apos;t load rating summary.
-      </p>
+      <div className="rounded-xl border border-gray-200 p-6">
+        <p className="text-sm text-gray-500">
+          Couldn&apos;t load rating summary.
+        </p>
+      </div>
     );
   }
 
@@ -37,42 +46,39 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
   };
 
   const distribution = data.distribution?.percentages || [];
+  const totalReviews = stats?.totalReviews ?? 0;
+  const averageRating = stats?.averageRating ?? 0;
 
   return (
-    <div>
-      <div className="mb-4 flex items-center gap-4">
-        <div className="text-3xl font-bold text-gray-900">
-          {(stats?.averageRating ?? 0).toFixed(1)}
+    <div className="rounded-xl border border-gray-200 p-6">
+      <div className="mb-6 flex items-center gap-4">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-3xl font-bold text-amber-600">
+          {averageRating.toFixed(1)}
         </div>
         <div>
-          <StarRating
-            value={stats?.averageRating ?? 0}
-            showCount={false}
-            size="sm"
-          />
-          <p className="text-xs text-gray-500">
-            {stats?.totalReviews ?? 0}{" "}
-            {(stats?.totalReviews ?? 0) === 1 ? "review" : "reviews"}
+          <StarRating value={averageRating} showCount={false} size="md" />
+          <p className="mt-1 text-sm text-gray-500">
+            Based on {totalReviews} {totalReviews === 1 ? "review" : "reviews"}
           </p>
         </div>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-3">
         {[5, 4, 3, 2, 1].map((rating) => {
           const row = distribution.find((d) => d.rating === rating);
           const pct = row?.percentage ?? 0;
 
           return (
-            <div key={rating} className="flex items-center gap-3 text-xs">
-              <span className="w-3 text-gray-600">{rating}</span>
-              <span className="text-amber-500">★</span>
-              <div className="h-2 flex-1 overflow-hidden rounded bg-gray-100">
+            <div key={rating} className="flex items-center gap-3 text-sm">
+              <span className="w-8 font-medium text-gray-700">{rating}</span>
+              <span className="text-amber-400">★</span>
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
                 <div
-                  className="h-full rounded bg-amber-400 transition-all"
+                  className="h-full rounded-full bg-amber-400 transition-all duration-500 ease-out"
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <span className="w-10 text-right text-gray-500">
+              <span className="w-12 text-right text-xs font-medium text-gray-500">
                 {pct.toFixed(0)}%
               </span>
             </div>
