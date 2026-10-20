@@ -49,6 +49,8 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
   const totalReviews = stats?.totalReviews ?? 0;
   const averageRating = stats?.averageRating ?? 0;
 
+  console.log({ stats });
+
   return (
     <div className="rounded-xl border border-gray-200 p-6">
       <div className="mb-6 flex items-center gap-4">
