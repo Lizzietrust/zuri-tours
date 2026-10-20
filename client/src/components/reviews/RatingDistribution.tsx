@@ -46,10 +46,24 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
   };
 
   const distribution = data.distribution?.percentages || [];
-  const totalReviews = stats?.totalReviews ?? 0;
-  const averageRating = stats?.averageRating ?? 0;
+  const totalReviews = Number(stats?.totalReviews ?? 0);
+  const averageRating = Number(stats?.averageRating ?? 0);
 
-  console.log({ stats });
+  if (totalReviews === 0) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-2xl">
+          ⭐
+        </div>
+        <p className="mt-3 text-sm font-semibold text-gray-900">
+          No ratings yet
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          Be the first to review this tour.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-gray-200 p-6">
@@ -68,7 +82,7 @@ export default function RatingDistribution({ tourId }: { tourId: string }) {
       <div className="space-y-3">
         {[5, 4, 3, 2, 1].map((rating) => {
           const row = distribution.find((d) => d.rating === rating);
-          const pct = row?.percentage ?? 0;
+          const pct = Number(row?.percentage ?? 0);
 
           return (
             <div key={rating} className="flex items-center gap-3 text-sm">
