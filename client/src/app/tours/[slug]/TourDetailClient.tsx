@@ -13,7 +13,30 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatDistance } from "@/lib/geo";
 import type { Tour } from "@/types";
 
-const FALLBACK_IMG = "/placeholder-tour.jpg";
+/**
+ * Inline SVG placeholder — no network request, no 404.
+ * Neutral gray gradient with a simple mountain/sun icon.
+ */
+const FALLBACK_IMG =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 750" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ecfdf5"/>
+          <stop offset="100%" stop-color="#d1fae5"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="750" fill="url(#g)"/>
+      <circle cx="900" cy="220" r="80" fill="#34d399" opacity="0.35"/>
+      <path d="M0 620 L280 400 L480 560 L720 320 L980 600 L1200 480 L1200 750 L0 750 Z"
+            fill="#10b981" opacity="0.55"/>
+      <text x="600" y="700" font-family="system-ui, sans-serif" font-size="28"
+            font-weight="600" fill="#065f46" text-anchor="middle" opacity="0.75">
+        Zuri Tours
+      </text>
+    </svg>`,
+  );
 
 const DIFFICULTY_STYLES: Record<Tour["difficulty"], string> = {
   easy: "bg-emerald-100 text-emerald-800 ring-emerald-200",
