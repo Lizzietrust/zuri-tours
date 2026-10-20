@@ -38,13 +38,24 @@ export default function ReviewList({ tourId }: { tourId: string }) {
             setSort(e.target.value);
             setPage(1);
           }}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          aria-label="Sort reviews"
+          className="cursor-pointer rounded-lg border-2 border-gray-400 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:border-emerald-500 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-200"
         >
-          <option value="-createdAt">Most Recent</option>
-          <option value="createdAt">Oldest</option>
-          <option value="-rating">Highest Rated</option>
-          <option value="rating">Lowest Rated</option>
-          <option value="-helpfulCount">Most Helpful</option>
+          <option value="-createdAt" className="font-medium text-gray-900">
+            Most Recent
+          </option>
+          <option value="createdAt" className="font-medium text-gray-900">
+            Oldest
+          </option>
+          <option value="-rating" className="font-medium text-gray-900">
+            Highest Rated
+          </option>
+          <option value="rating" className="font-medium text-gray-900">
+            Lowest Rated
+          </option>
+          <option value="-helpfulCount" className="font-medium text-gray-900">
+            Most Helpful
+          </option>
         </select>
       </div>
 
@@ -102,12 +113,12 @@ export default function ReviewList({ tourId }: { tourId: string }) {
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border-2 border-gray-400 px-4 py-2 text-sm font-semibold text-gray-800 transition hover:border-emerald-500 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 disabled:hover:bg-transparent"
               >
                 Previous
               </button>
 
-              <span className="text-sm font-medium text-gray-500">
+              <span className="text-sm font-semibold text-gray-700">
                 Page {page} of {pages}
               </span>
 
@@ -115,7 +126,7 @@ export default function ReviewList({ tourId }: { tourId: string }) {
                 type="button"
                 onClick={() => setPage((p) => Math.min(pages, p + 1))}
                 disabled={page >= pages}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border-2 border-gray-400 px-4 py-2 text-sm font-semibold text-gray-800 transition hover:border-emerald-500 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 disabled:hover:bg-transparent"
               >
                 Next
               </button>
