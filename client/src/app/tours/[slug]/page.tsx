@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { tourService } from "@/services/tours";
 import TourDetailClient from "./TourDetailClient";
 
-const API_ORIGIN =
-  process.env.NEXT_PUBLIC_API_ORIGIN || "http://localhost:8000";
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN;
 
 export async function generateMetadata({
   params,
