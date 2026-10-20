@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { reviewService } from "@/services/reviews";
 import { useAuth } from "@/hooks/useAuth";
 import Button from "@/components/ui/Button";
-import Alert from "@/components/ui/Alert";
 import Input from "@/components/ui/Input";
 import StarInput from "./StarInput";
 import type { Review } from "@/types";
@@ -18,12 +18,13 @@ type ReviewFormValues = {
   isRecommended: boolean;
 };
 
-type ReviewFormInnerProps = {
+function ReviewFormInner({
+  tourId,
+  initialReview,
+}: {
   tourId: string;
   initialReview: Review | null;
-};
-
-function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
+}) {
   const queryClient = useQueryClient();
 
   const [rating, setRating] = useState(initialReview?.rating ?? 0);
@@ -33,25 +34,32 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
     initialReview?.isRecommended ?? true,
   );
 
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
   const isEditing = !!initialReview;
 
-  /* ---------- Mutations ---------- */
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
+    queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
+    queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
+    queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
+  };
+
   const createMutation = useMutation({
     mutationFn: (input: ReviewFormValues) =>
       reviewService.create(tourId, input),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
-      setSuccess("Review submitted successfully. Thank you!");
-      setError(null);
+      invalidateAll();
+      toast.success("Review published!", {
+        description: "Thanks for sharing — your feedback is now live.",
+      });
+      setRating(0);
+      setTitle("");
+      setReviewText("");
+      setIsRecommended(true);
     },
     onError: (err: { message?: string }) => {
-      setError(err.message || "Failed to submit review");
+      toast.error("Failed to submit review", {
+        description: err.message || "Please try again.",
+      });
     },
   });
 
@@ -59,15 +67,15 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
     mutationFn: (input: Partial<ReviewFormValues>) =>
       reviewService.updateMy(tourId, input),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
-      queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
-      setSuccess("Review updated successfully.");
-      setError(null);
+      invalidateAll();
+      toast.success("Review updated!", {
+        description: "Your changes are live.",
+      });
     },
     onError: (err: { message?: string }) => {
-      setError(err.message || "Failed to update review");
+      toast.error("Failed to update review", {
+        description: err.message || "Please try again.",
+      });
     },
   });
 
@@ -75,19 +83,17 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setSuccess(null);
 
     if (rating < 1) {
-      setError("Please pick a rating.");
+      toast.warning("Please pick a rating.", {
+        description: "You must select at least 1 star.",
+      });
       return;
     }
     if (reviewText.trim().length < 5) {
-      setError("Review must be at least 5 characters.");
-      return;
-    }
-    if (reviewText.trim().length > 500) {
-      setError("Review cannot exceed 500 characters.");
+      toast.warning("Review too short.", {
+        description: "Please write at least 5 characters.",
+      });
       return;
     }
 
@@ -98,28 +104,37 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
       isRecommended,
     };
 
-    if (isEditing) {
-      updateMutation.mutate(payload);
-    } else {
-      createMutation.mutate(payload);
-    }
+    if (isEditing) updateMutation.mutate(payload);
+    else createMutation.mutate(payload);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-5 rounded-xl border border-gray-200 bg-gray-50/50 p-5 md:p-6"
+    >
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900">
+          {isEditing ? "Edit your review" : "Share your experience"}
+        </h3>
+        <p className="text-sm text-gray-500">
+          Your feedback helps other travelers make better choices.
+        </p>
+      </div>
+
       <div>
         <label className="mb-2 block text-sm font-medium text-gray-700">
-          Your rating
+          Overall Rating <span className="text-red-500">*</span>
         </label>
         <StarInput value={rating} onChange={setRating} size="lg" />
       </div>
 
       <Input
-        label="Title (optional)"
+        label="Review Title (optional)"
         type="text"
         name="title"
         maxLength={100}
-        placeholder="Sum up your experience"
+        placeholder="Sum up your experience in a few words"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
@@ -129,7 +144,7 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
           htmlFor="review"
           className="mb-1.5 block text-sm font-medium text-gray-700"
         >
-          Your review
+          Your Review <span className="text-red-500">*</span>
         </label>
         <textarea
           id="review"
@@ -140,45 +155,36 @@ function ReviewFormInner({ tourId, initialReview }: ReviewFormInnerProps) {
           rows={4}
           value={reviewText}
           onChange={(e) => setReviewText(e.target.value)}
-          placeholder="Tell other travelers what you thought…"
+          placeholder="What did you enjoy most? What could be improved?"
           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
         />
-        <p className="mt-1 text-xs text-gray-500">{reviewText.length} / 500</p>
+        <div className="mt-1 flex justify-between text-xs text-gray-500">
+          <span>Minimum 5 characters</span>
+          <span className={reviewText.length > 500 ? "text-red-500" : ""}>
+            {reviewText.length} / 500
+          </span>
+        </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-gray-700">
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
         <input
           type="checkbox"
           checked={isRecommended}
           onChange={(e) => setIsRecommended(e.target.checked)}
           className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
         />
-        I recommend this tour
+        I recommend this tour to others
       </label>
 
-      {error && <Alert type="error" message={error} />}
-      {success && <Alert type="success" message={success} />}
-
-      <div className="flex gap-2">
-        <Button type="submit" loading={isPending} size="lg">
+      <div className="flex items-center gap-3 pt-2">
+        <Button type="submit" loading={isPending} className="w-full sm:w-auto">
           {isEditing ? "Update review" : "Submit review"}
         </Button>
       </div>
-
-      {isEditing && initialReview?.status === "approved" && (
-        <p className="text-xs text-gray-500">
-          Updating your review will send it back for moderation.
-        </p>
-      )}
     </form>
   );
 }
 
-/* ----------------------------------------------------------------
-   Outer wrapper — decides whether to render the form, a login
-   prompt, or a loading state. Passes the review through as a
-   plain prop; no local state, no effects.
-   ---------------------------------------------------------------- */
 export default function ReviewForm({ tourId }: { tourId: string }) {
   const { isAuthenticated } = useAuth();
 
@@ -190,27 +196,27 @@ export default function ReviewForm({ tourId }: { tourId: string }) {
     staleTime: 1000 * 60,
   });
 
-  /* ---------- Not logged in → prompt to log in ---------- */
   if (!isAuthenticated) {
     return (
-      <Alert
-        type="info"
-        title="Want to leave a review?"
-        message="Please log in to share your experience with this tour."
-        action={
-          <Link
-            href={`/login?redirect=/tours`}
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
-          >
-            Log in
-          </Link>
-        }
-      />
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-center">
+        <h3 className="text-lg font-semibold text-gray-900">
+          Want to leave a review?
+        </h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Please log in to share your experience with this tour.
+        </p>
+        <Link
+          href={`/login?redirect=/tours/${tourId}`}
+          className="mt-4 inline-block rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+        >
+          Log in to Review
+        </Link>
+      </div>
     );
   }
 
   if (myReviewLoading) {
-    return <p className="text-sm text-gray-500">Loading your review…</p>;
+    return <div className="h-32 animate-pulse rounded-xl bg-gray-100" />;
   }
 
   return (
