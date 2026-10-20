@@ -15,25 +15,13 @@ export interface UpdateReviewInput {
   isRecommended?: boolean;
 }
 
-/* ---------- Response shape helpers ---------- */
-
 type TourReviewsResponse = {
   status: string;
   results: number;
   total: number;
   page: number;
   pages: number;
-  data: {
-    reviews:
-      | Review[]
-      | {
-          data: Review[];
-          total: number;
-          page: number;
-          pages: number;
-          limit: number;
-        };
-  };
+  data: { reviews: Review[] };
 };
 
 type StatsResponse = {
@@ -49,36 +37,7 @@ type StatsResponse = {
   };
 };
 
-/* ---------- Normalize ---------- */
-
-function normalizeTourReviewsPayload(
-  raw: TourReviewsResponse,
-): ApiListResponse<Review> {
-  const r = raw.data.reviews;
-
-  if (Array.isArray(r)) {
-    return {
-      status: "success",
-      results: raw.results ?? r.length,
-      total: raw.total ?? r.length,
-      page: raw.page ?? 1,
-      pages: raw.pages ?? 1,
-      data: { reviews: r },
-    };
-  }
-
-  return {
-    status: "success",
-    results: r.data.length,
-    total: r.total,
-    page: r.page,
-    pages: r.pages,
-    data: { reviews: r.data },
-  };
-}
-
 export const reviewService = {
-  /* ---------- List reviews for a tour ---------- */
   async getForTour(
     tourId: string,
     params?: {
@@ -95,10 +54,16 @@ export const reviewService = {
       { params },
     );
 
-    return normalizeTourReviewsPayload(data);
+    return {
+      status: "success",
+      results: data.results ?? data.data.reviews.length,
+      total: data.total ?? data.data.reviews.length,
+      page: data.page ?? 1,
+      pages: data.pages ?? 1,
+      data: { reviews: data.data.reviews || [] },
+    };
   },
 
-  /* ---------- Get logged-in user's review for a tour ---------- */
   async getMyReviewForTour(tourId: string): Promise<Review | null> {
     try {
       const { data } = await api.get(`/reviews/me/${tourId}`);
@@ -110,29 +75,24 @@ export const reviewService = {
     }
   },
 
-  /* ---------- Create a new review for a tour ---------- */
   async create(tourId: string, input: CreateReviewInput): Promise<Review> {
     const { data } = await api.post(`/tours/${tourId}/reviews`, input);
     return data.data.review as Review;
   },
 
-  /* ---------- Update own review for a tour ---------- */
   async updateMy(tourId: string, input: UpdateReviewInput): Promise<Review> {
     const { data } = await api.patch(`/reviews/me/${tourId}`, input);
     return data.data.review as Review;
   },
 
-  /* ---------- Delete a review ---------- */
   async remove(reviewId: string): Promise<void> {
     await api.delete(`/reviews/${reviewId}`);
   },
 
-  /* ---------- Mark as helpful ---------- */
   async markHelpful(reviewId: string): Promise<void> {
     await api.patch(`/reviews/${reviewId}/helpful`);
   },
 
-  /* ---------- Review stats for a tour ---------- */
   async getStats(tourId: string): Promise<{
     stats: Record<string, unknown>;
     distribution: {
@@ -146,8 +106,12 @@ export const reviewService = {
     });
 
     return {
-      stats: data.data.stats,
-      distribution: data.data.distribution,
+      stats: data.data.stats || {},
+      distribution: data.data.distribution || {
+        distribution: [],
+        percentages: [],
+        total: 0,
+      },
     };
   },
 };
