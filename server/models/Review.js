@@ -40,11 +40,25 @@ const reviewSchema = new mongoose.Schema(
       respondedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
       respondedAt: { type: Date },
     },
+
+    /* ---------- Post-moderation status ---------- */
+
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "flagged"],
-      default: "pending",
+      enum: ["approved", "pending", "rejected", "flagged", "hidden"],
+      default: "approved",
     },
+
+    /* ---------- Post-moderation audit ---------- */
+
+    needsModeration: {
+      type: Boolean,
+      default: true,
+    },
+    moderatedAt: Date,
+    moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    moderationNote: { type: String, maxlength: 500 },
+
     flagReasons: [
       {
         reason: {
@@ -94,27 +108,34 @@ const reviewSchema = new mongoose.Schema(
 );
 
 /* ================================================================== */
-/*  INDEXES — the unique compound index is what enforces one review   */
-/*  per user per tour at the DATABASE level.                          */
+/*  INDEXES                                                           */
+/*  Every index declared exactly ONCE here.                           */
 /* ================================================================== */
 
-/**
- * #1 CRITICAL — one review per user per tour.
- * MongoDB will reject any second insert with `E11000 duplicate key`.
- * This is the ultimate source of truth for duplicate prevention.
- */
+/* Unique: one review per user per tour */
 reviewSchema.index({ tour: 1, user: 1 }, { unique: true });
 
+/* Listing / sorting */
 reviewSchema.index({ tour: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, createdAt: -1 });
 reviewSchema.index({ rating: -1 });
-reviewSchema.index({ status: 1 });
 reviewSchema.index({ isVerifiedPurchase: 1 });
 reviewSchema.index({ createdAt: -1 });
 reviewSchema.index({ helpfulCount: -1 });
+
+/* Compound: status-filtered tour listing */
 reviewSchema.index({ tour: 1, status: 1, createdAt: -1 });
+
+/* Compound: per-user status listing (used by getMyReviews) */
 reviewSchema.index({ user: 1, status: 1 });
+
+/* Compound: top-rated with helpful tie-break */
 reviewSchema.index({ rating: -1, helpfulCount: -1 });
+
+/* Moderation queue */
+reviewSchema.index({ needsModeration: 1, createdAt: -1 });
+
+/* Full-text search */
 reviewSchema.index(
   { review: "text", title: "text" },
   {
@@ -132,6 +153,7 @@ reviewSchema.virtual("formattedRating").get(function getFormattedRating() {
 
   return `${stars}${halfStar} (${this.rating.toFixed(1)})`;
 });
+
 reviewSchema.virtual("reviewAge").get(function getReviewAge() {
   const now = new Date();
   const diff = now - this.createdAt;
@@ -145,12 +167,15 @@ reviewSchema.virtual("reviewAge").get(function getReviewAge() {
 
   return `${Math.floor(days / 365)} years ago`;
 });
+
 reviewSchema.virtual("isEdited").get(function getIsEdited() {
   return this.editHistory && this.editHistory.length > 0;
 });
+
 reviewSchema.virtual("hasResponse").get(function getHasResponse() {
   return !!(this.response && this.response.text);
 });
+
 reviewSchema.virtual("canBeHelpful").get(function getCanBeHelpful() {
   return this.status === "approved";
 });
@@ -231,7 +256,10 @@ reviewSchema.query = {
     let q = this;
 
     if (populateUser) {
-      q = q.populate({ path: "user", select: "name email profileImage role" });
+      q = q.populate({
+        path: "user",
+        select: "name email profileImage role",
+      });
     }
     if (populateTour) {
       q = q.populate({
@@ -344,17 +372,9 @@ reviewSchema.statics.calcAverageRatingsForTours =
   };
 
 /* ================================================================== */
-/*  STATICS — DUPLICATE PREVENTION HELPERS                            */
+/*  STATICS — duplicate prevention helpers                            */
 /* ================================================================== */
 
-/**
- * Check whether a user has already reviewed a given tour.
- * Cheaper than a full query — uses `exists()` under the hood.
- *
- * @param {ObjectId|string} userId
- * @param {ObjectId|string} tourId
- * @returns {Promise<boolean>}
- */
 reviewSchema.statics.hasUserReviewedTour = async function hasUserReviewedTour(
   userId,
   tourId,
@@ -373,13 +393,6 @@ reviewSchema.statics.hasUserReviewedTour = async function hasUserReviewedTour(
   return !!existing;
 };
 
-/**
- * Fetch a user's review for a specific tour, or null.
- *
- * @param {ObjectId|string} userId
- * @param {ObjectId|string} tourId
- * @returns {Promise<Document|null>}
- */
 reviewSchema.statics.getUserReviewForTour = function getUserReviewForTour(
   userId,
   tourId,
@@ -387,11 +400,6 @@ reviewSchema.statics.getUserReviewForTour = function getUserReviewForTour(
   return this.findOne({ user: userId, tour: tourId });
 };
 
-/**
- * Fetch a user's review for a specific tour WITH the user and tour
- * documents populated. Useful when you want to render an "edit your
- * review" form directly.
- */
 reviewSchema.statics.getUserReviewForTourPopulated =
   function getUserReviewForTourPopulated(userId, tourId) {
     return this.findOne({ user: userId, tour: tourId })
@@ -403,19 +411,10 @@ reviewSchema.statics.getUserReviewForTourPopulated =
       .lean();
   };
 
-/**
- * Return an array of tour ids that a given user has already reviewed.
- * Useful for rendering "you already reviewed these" badges on a list
- * of tours.
- *
- * @param {ObjectId|string} userId
- * @returns {Promise<ObjectId[]>}
- */
 reviewSchema.statics.getReviewedTourIds = async function getReviewedTourIds(
   userId,
 ) {
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return [];
-
   const reviews = await this.find({ user: userId }, { tour: 1 }).lean();
 
   return reviews.map((r) => r.tour);
@@ -526,36 +525,37 @@ reviewSchema.statics.getRatingDistribution =
     return distribution[0] || null;
   };
 
-reviewSchema.statics.getReviewsByDateRange =
-  async function getReviewsByDateRange(startDate, endDate, tourId = null) {
-    const match = {
-      createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) },
-      status: "approved",
-    };
-
-    if (tourId) match.tour = tourId;
-
-    const results = await this.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: {
-            year: { $year: "$createdAt" },
-            month: { $month: "$createdAt" },
-            day: { $dayOfMonth: "$createdAt" },
-          },
-          count: { $sum: 1 },
-          averageRating: { $avg: "$rating" },
-          reviews: { $push: "$$ROOT" },
-        },
-      },
-      { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
-    ]);
-
-    return results;
+reviewSchema.statics.getReviewsByDateRange = function getReviewsByDateRange(
+  startDate,
+  endDate,
+  tourId = null,
+) {
+  const match = {
+    createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) },
+    status: "approved",
   };
 
-/* --------------------------- Methods ------------------------------ */
+  if (tourId) match.tour = tourId;
+
+  return this.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          year: { $year: "$createdAt" },
+          month: { $month: "$createdAt" },
+          day: { $dayOfMonth: "$createdAt" },
+        },
+        count: { $sum: 1 },
+        averageRating: { $avg: "$rating" },
+        reviews: { $push: "$$ROOT" },
+      },
+    },
+    { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
+  ]);
+};
+
+/* --------------------------- Instance methods --------------------- */
 
 reviewSchema.methods.markHelpful = async function markHelpful() {
   this.helpfulCount += 1;
@@ -563,6 +563,7 @@ reviewSchema.methods.markHelpful = async function markHelpful() {
 
   return this;
 };
+
 reviewSchema.methods.addResponse = async function addResponse(
   text,
   responderId,
@@ -572,6 +573,7 @@ reviewSchema.methods.addResponse = async function addResponse(
 
   return this;
 };
+
 reviewSchema.methods.flagReview = async function flagReview(
   reason,
   description,
@@ -584,27 +586,54 @@ reviewSchema.methods.flagReview = async function flagReview(
     flaggedBy: flaggerId,
     flaggedAt: new Date(),
   });
-  if (this.flagReasons.length >= 3) this.status = "flagged";
+  if (this.flagReasons.length >= 3) {
+    this.status = "flagged";
+    this.needsModeration = true;
+  }
   await this.save();
 
   return this;
 };
-reviewSchema.methods.approve = async function approve() {
+
+/* ---------- Post-moderation actions ---------- */
+
+reviewSchema.methods.approve = async function approve(moderatorId) {
   this.status = "approved";
+  this.needsModeration = false;
+  this.moderatedAt = new Date();
+  if (moderatorId) this.moderatedBy = moderatorId;
   await this.save();
 
   return this;
 };
-reviewSchema.methods.reject = async function reject() {
+
+reviewSchema.methods.reject = async function reject(moderatorId, note) {
   this.status = "rejected";
+  this.needsModeration = false;
+  this.moderatedAt = new Date();
+  if (moderatorId) this.moderatedBy = moderatorId;
+  if (note) this.moderationNote = note;
   await this.save();
 
   return this;
 };
+
+reviewSchema.methods.hide = async function hide(moderatorId, note) {
+  this.status = "hidden";
+  this.needsModeration = false;
+  this.moderatedAt = new Date();
+  if (moderatorId) this.moderatedBy = moderatorId;
+  if (note) this.moderationNote = note;
+  await this.save();
+
+  return this;
+};
+
 reviewSchema.methods.editReview = async function editReview(
   newReview,
   newRating,
   editorId,
+  extra = {},
 ) {
   if (!this.editHistory) this.editHistory = [];
   this.editHistory.push({
@@ -613,12 +642,23 @@ reviewSchema.methods.editReview = async function editReview(
     editedAt: new Date(),
     editedBy: editorId,
   });
-  this.review = newReview;
-  this.rating = newRating;
+
+  if (newReview !== undefined) this.review = newReview;
+  if (newRating !== undefined) this.rating = newRating;
+  if (extra.title !== undefined) this.title = extra.title;
+  if (extra.isRecommended !== undefined)
+    this.isRecommended = extra.isRecommended;
+
+  this.needsModeration = true;
+  this.moderatedAt = undefined;
+  this.moderatedBy = undefined;
+
   await this.save();
 
   return this;
 };
+
+/* --------------------------- Hooks -------------------------------- */
 
 reviewSchema.pre("save", async function preSaveMiddleware() {
   if (this.rating < 1 || this.rating > 5) {
@@ -626,9 +666,7 @@ reviewSchema.pre("save", async function preSaveMiddleware() {
   }
 
   if (!this.isNew) return;
-
   if (this.$locals?.allowDuplicate === true) return;
-
   if (!this.tour || !this.user) return;
 
   const existing = await this.constructor.exists({
@@ -653,7 +691,6 @@ reviewSchema.pre("save", async function preSaveMiddleware() {
 
 reviewSchema.post("save", function postSaveDuplicateMapper(err, doc, next) {
   if (!err) return next();
-
   if (err.code === 11000 && err.keyPattern?.tour && err.keyPattern?.user) {
     const validationErr = new mongoose.Error.ValidationError(doc);
 
@@ -672,13 +709,8 @@ reviewSchema.post("save", function postSaveDuplicateMapper(err, doc, next) {
   return next(err);
 });
 
-/**
- * Recalculate the tour's average rating after a review is saved.
- * Only runs when something that can affect the average changed.
- */
 reviewSchema.post("save", async function handleSavePost(doc) {
   if (!doc || !doc.tour) return;
-
   try {
     const affectsAverage =
       doc.isNew ||
@@ -687,7 +719,6 @@ reviewSchema.post("save", async function handleSavePost(doc) {
       doc.isModified("tour");
 
     if (!affectsAverage) return;
-
     await doc.constructor.calcAverageRatings(doc.tour);
   } catch (error) {
     console.error("Error updating tour ratings after save:", error);
@@ -714,14 +745,9 @@ reviewSchema.pre("findOneAndUpdate", async function preFindOneAndUpdate() {
     _id: { $ne: filter._id },
   });
 
-  if (existing) {
-    throw new Error("You have already reviewed this tour");
-  }
+  if (existing) throw new Error("You have already reviewed this tour");
 });
 
-/**
- * Recalculate after `findOneAndUpdate` / `findByIdAndUpdate`.
- */
 reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   try {
     if (doc && doc.tour) {
@@ -732,8 +758,18 @@ reviewSchema.post(/^findOneAnd/, async function handleFindOneAndPost(doc) {
   }
 });
 
+/**
+ * Status filter: ONLY applies "approved" when the caller didn't opt out.
+ * Supports both `query._skipStatusFilter = true` (direct property) and
+ * `query.setOptions({ _skipStatusFilter: true })` (options object).
+ */
 reviewSchema.pre("find", function preFindMiddleware() {
-  if (!this._includeAll && !this._skipStatusFilter) {
+  const skip =
+    this._skipStatusFilter === true || this.options?._skipStatusFilter === true;
+  const includeAll =
+    this._includeAll === true || this.options?._includeAll === true;
+
+  if (!includeAll && !skip) {
     this.where("status").equals("approved");
   }
 });
