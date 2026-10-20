@@ -69,29 +69,18 @@ const populateReviewFields = (query, populateOptions = {}) => {
       .populate(POPULATION_CONFIG.attachments);
   }
 
-  if (populateUser) {
+  if (populateUser)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.user);
-  }
-
-  if (populateTour) {
+  if (populateTour)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.tour);
-  }
-
-  if (populateResponseUser) {
+  if (populateResponseUser)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.responseUser);
-  }
-
-  if (populateFlagUsers) {
+  if (populateFlagUsers)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.flagUsers);
-  }
-
-  if (populateEditHistory) {
+  if (populateEditHistory)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.editHistory);
-  }
-
-  if (populateAttachments) {
+  if (populateAttachments)
     populatedQuery = populatedQuery.populate(POPULATION_CONFIG.attachments);
-  }
 
   for (const custom of customPopulations) {
     populatedQuery = populatedQuery.populate(custom);
@@ -176,7 +165,7 @@ const bulkDeleteReviews = deleteMany(Review, {
 });
 
 /* ============================================================
-   CREATE FACTORY HANDLER
+   CREATE — Post-moderation: publish instantly, flag for review
    ============================================================ */
 
 const createReview = createOne(Review, {
@@ -195,16 +184,11 @@ const createReview = createOne(Review, {
     if (!data.review || !data.rating) {
       throw new AppError("Please provide review text and rating", 400);
     }
-
-    if (!tourId) {
-      throw new AppError("Tour ID is required", 400);
-    }
+    if (!tourId) throw new AppError("Tour ID is required", 400);
 
     const tour = await Tour.findById(tourId);
 
-    if (!tour) {
-      throw new AppError("Tour not found", 404);
-    }
+    if (!tour) throw new AppError("Tour not found", 404);
 
     const alreadyReviewed = await Review.hasUserReviewedTour(
       req.user._id,
@@ -223,12 +207,6 @@ const createReview = createOne(Review, {
       );
     }
 
-    const isTourCreator = tour.createdBy.toString() === req.user._id.toString();
-    const autoApprove =
-      req.user.role === "admin" ||
-      req.user.role === "lead-guide" ||
-      isTourCreator;
-
     return {
       ...data,
       tour: tourId,
@@ -237,7 +215,8 @@ const createReview = createOne(Review, {
       isVerifiedPurchase,
       isRecommended:
         data.isRecommended !== undefined ? data.isRecommended : true,
-      ...(autoApprove && { status: "approved" }),
+      status: "approved",
+      needsModeration: !isVerifiedPurchase,
       metadata: {
         userAgent: req.headers["user-agent"],
         ipAddress: req.ip || req.connection.remoteAddress,
@@ -263,17 +242,14 @@ const updateReview = updateOne(Review, {
     { path: "editHistory.editedBy", select: "name email role" },
     { path: "response.respondedBy", select: "name email role profileImage" },
   ],
-
   checkOwnership: (doc, req) => {
     if (doc.user.toString() !== req.user._id.toString()) {
       throw new AppError("You are not authorized to update this review", 403);
     }
-
     if (doc.status === "rejected" || doc.status === "flagged") {
       throw new AppError("This review cannot be edited", 400);
     }
   },
-
   beforeUpdate: (data, existingDoc, req) => {
     const updateData = {};
 
@@ -292,12 +268,11 @@ const updateReview = updateOne(Review, {
       editedAt: new Date(),
       editedBy: req.user._id,
     });
-
     updateData.editHistory = editHistory;
 
-    if (existingDoc.status === "approved") {
-      updateData.status = "pending";
-    }
+    updateData.needsModeration = true;
+    updateData.moderatedAt = undefined;
+    updateData.moderatedBy = undefined;
 
     return updateData;
   },
@@ -322,7 +297,6 @@ const getAllReviews = getAll(Review, {
   defaultLimit: 10,
   maxLimit: 100,
   resourceKey: "reviews",
-
   transformFilter: (filter, req) => {
     const tourId = req.params.tourId || req.query.tourId;
     const { minRating, maxRating, status } = req.query;
@@ -352,13 +326,9 @@ const getAllReviews = getAll(Review, {
 
     return newFilter;
   },
-
   populateOptions: (req) => {
     const popOpts = [
-      {
-        path: "user",
-        select: "name email profileImage role bio",
-      },
+      { path: "user", select: "name email profileImage role bio" },
       {
         path: "tour",
         select:
@@ -379,7 +349,6 @@ const getAllReviews = getAll(Review, {
 
     return popOpts;
   },
-
   afterQuery: (docs, req) => {
     if (req.user?.role !== "admin") {
       return docs.map((doc) => {
@@ -401,10 +370,7 @@ const getReview = getOne(Review, {
   conditions: {},
   checkAccess: (doc, req) => {
     if (doc.status === "approved") return;
-
-    if (!req.user) {
-      throw new AppError("Review is not available", 404);
-    }
+    if (!req.user) throw new AppError("Review is not available", 404);
 
     const isOwner = doc.user?._id?.toString() === req.user._id.toString();
     const isAdmin = req.user.role === "admin";
@@ -449,13 +415,9 @@ const getReview = getOne(Review, {
 
 const markHelpful = catchAsync(async (req, res) => {
   const { id } = req.params;
-
   const review = await Review.findById(id);
 
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
-
+  if (!review) throw new AppError("Review not found", 404);
   if (review.status !== "approved") {
     throw new AppError("This review cannot be marked as helpful", 400);
   }
@@ -481,21 +443,15 @@ const addReviewResponse = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
 
-  if (!text) {
-    throw new AppError("Please provide a response text", 400);
-  }
+  if (!text) throw new AppError("Please provide a response text", 400);
 
   const review = await Review.findById(id);
 
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
+  if (!review) throw new AppError("Review not found", 404);
 
   const tour = await Tour.findById(review.tour);
 
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
+  if (!tour) throw new AppError("Tour not found", 404);
 
   const isTourCreator = tour.createdBy.toString() === req.user._id.toString();
   const isAdmin = req.user.role === "admin";
@@ -520,26 +476,19 @@ const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * ✅ KEPT as-is: uses `review.approve()` instance method, which also
- * recalculates the tour's average rating. Do NOT replace with a
- * findByIdAndUpdate + moderatedAt/moderatedBy — that would silently
- * skip the tour-average recalculation and the fields may not exist.
- */
+/* ---------- Admin moderation ---------- */
+
 const approveReview = catchAsync(async (req, res) => {
   const { id } = req.params;
-
   const review = await Review.findById(id);
 
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
+  if (!review) throw new AppError("Review not found", 404);
 
   if (req.user.role !== "admin") {
     throw new AppError("You are not authorized to approve reviews", 403);
   }
 
-  await review.approve();
+  await review.approve(req.user._id);
 
   const populatedReview = await populateReviewFields(Review.findById(id), {
     populateUser: true,
@@ -555,23 +504,19 @@ const approveReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * ✅ KEPT as-is: uses `review.reject()` instance method.
- */
 const rejectReview = catchAsync(async (req, res) => {
   const { id } = req.params;
+  const { note } = req.body;
 
   const review = await Review.findById(id);
 
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
+  if (!review) throw new AppError("Review not found", 404);
 
   if (req.user.role !== "admin") {
     throw new AppError("You are not authorized to reject reviews", 403);
   }
 
-  await review.reject();
+  await review.reject(req.user._id, note);
 
   res.status(200).json({
     status: "success",
@@ -579,19 +524,71 @@ const rejectReview = catchAsync(async (req, res) => {
   });
 });
 
+const hideReview = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { note } = req.body;
+
+  const review = await Review.findById(id);
+
+  if (!review) throw new AppError("Review not found", 404);
+
+  if (req.user.role !== "admin") {
+    throw new AppError("Only admins can hide reviews", 403);
+  }
+
+  await review.hide(req.user._id, note);
+
+  res.status(200).json({
+    status: "success",
+    message: "Review hidden successfully",
+    data: { review },
+  });
+});
+
+const getModerationQueue = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, status } = req.query;
+
+  if (req.user.role !== "admin") {
+    throw new AppError("Only admins can view the moderation queue", 403);
+  }
+
+  const filter = { needsModeration: true };
+
+  if (status && status !== "all") filter.status = status;
+
+  const pageNum = parseInt(page, 10);
+  const limitNum = parseInt(limit, 10);
+
+  const [reviews, total] = await Promise.all([
+    Review.find(filter)
+      .sort("-createdAt")
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
+      .populate({ path: "user", select: "name email profileImage role" })
+      .populate({ path: "tour", select: "name slug imageCover" })
+      .lean(),
+    Review.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    results: reviews.length,
+    total,
+    page: pageNum,
+    pages: Math.ceil(total / limitNum),
+    data: { reviews },
+  });
+});
+
 const flagReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { reason, description } = req.body;
 
-  if (!reason) {
-    throw new AppError("Please provide a reason for flagging", 400);
-  }
+  if (!reason) throw new AppError("Please provide a reason for flagging", 400);
 
   const review = await Review.findById(id);
 
-  if (!review) {
-    throw new AppError("Review not found", 404);
-  }
+  if (!review) throw new AppError("Review not found", 404);
 
   const alreadyFlagged = review.flagReasons.some(
     (flag) => flag.flaggedBy.toString() === req.user._id.toString(),
@@ -616,12 +613,8 @@ const flagReview = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * ✅ FIXED: now reads tourId from `req.params.tourId`, `req.params.id`,
- * or `req.query.tourId` in that order. Also handles the case where the
- * route is mounted under `/tours/:tourId/reviews/stats` thanks to
- * `mergeParams: true`.
- */
+/* ---------- Stats ---------- */
+
 const getReviewStats = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
 
@@ -634,24 +627,16 @@ const getReviewStats = catchAsync(async (req, res) => {
 
   const tour = await Tour.findById(tourId);
 
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
+  if (!tour) throw new AppError("Tour not found", 404);
 
   const stats = await Review.getReviewStats(tourId);
   const distribution = await Review.getRatingDistribution(tourId);
 
   const recentReviews = await populateReviewFields(
-    Review.find({
-      tour: tourId,
-      status: "approved",
-    })
+    Review.find({ tour: tourId, status: "approved" })
       .sort("-createdAt")
       .limit(3),
-    {
-      populateUser: true,
-      populateTour: false,
-    },
+    { populateUser: true, populateTour: false },
   ).lean();
 
   res.status(200).json({
@@ -680,6 +665,10 @@ const getReviewStats = catchAsync(async (req, res) => {
   });
 });
 
+/* ============================================================
+   TOUR REVIEWS — public listing with author fallback
+   ============================================================ */
+
 const getTourReviews = catchAsync(async (req, res) => {
   const tourId = req.params.tourId || req.params.id || req.query.tourId;
   const {
@@ -694,32 +683,35 @@ const getTourReviews = catchAsync(async (req, res) => {
     userFields,
   } = req.query;
 
-  if (!tourId) {
-    throw new AppError("Tour ID is required", 400);
-  }
+  if (!tourId) throw new AppError("Tour ID is required", 400);
 
   const tour = await Tour.findById(tourId);
 
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
+  if (!tour) throw new AppError("Tour not found", 404);
+
+  const currentUserId = req.user?._id;
+
+  let visibilityFilter;
+
+  if (req.user?.role === "admin") {
+    visibilityFilter = {};
+  } else if (currentUserId) {
+    visibilityFilter = {
+      $or: [{ status: "approved" }, { user: currentUserId }],
+    };
+  } else {
+    visibilityFilter = { status: "approved" };
   }
 
-  let query = Review.find({
-    tour: tourId,
-    status: "approved",
+  const baseFilter = { tour: tourId, ...visibilityFilter };
+
+  const query = Review.find(baseFilter).setOptions({
+    _skipStatusFilter: true,
   });
 
-  if (minRating) {
-    query = query.where("rating").gte(parseFloat(minRating));
-  }
-
-  if (maxRating) {
-    query = query.where("rating").lte(parseFloat(maxRating));
-  }
-
-  if (helpful === "true") {
-    query = query.where("helpfulCount").gte(1);
-  }
+  if (minRating) query.where("rating").gte(parseFloat(minRating));
+  if (maxRating) query.where("rating").lte(parseFloat(maxRating));
+  if (helpful === "true") query.where("helpfulCount").gte(1);
 
   const sortOptions = {
     "-createdAt": { createdAt: -1 },
@@ -730,15 +722,14 @@ const getTourReviews = catchAsync(async (req, res) => {
     helpfulCount: { helpfulCount: 1 },
   };
 
-  query = query.sort(sortOptions[sort] || { createdAt: -1 });
+  query.sort(sortOptions[sort] || { createdAt: -1 });
 
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
 
-  query = query.skip(skip).limit(limitNum);
+  query.skip((pageNum - 1) * limitNum).limit(limitNum);
 
-  const parsedOptions = {
+  populateReviewFields(query, {
     populateAll,
     populateUser,
     populateTour: "false",
@@ -747,15 +738,12 @@ const getTourReviews = catchAsync(async (req, res) => {
     populateFlagUsers: "false",
     populateEditHistory: "false",
     userFields,
-  };
-
-  query = populateReviewFields(query, parsedOptions);
+  });
 
   const reviews = await query.lean();
 
-  const total = await Review.countDocuments({
-    tour: tourId,
-    status: "approved",
+  const total = await Review.countDocuments(baseFilter).setOptions({
+    _skipStatusFilter: true,
   });
 
   res.status(200).json({
@@ -781,19 +769,21 @@ const getMyReviews = catchAsync(async (req, res) => {
     tourFields,
   } = req.query;
 
-  let query = Review.find({ user: req.user._id });
+  let query = Review.find({ user: req.user._id }).setOptions({
+    _skipStatusFilter: true,
+  });
 
-  if (status) {
-    query = query.where("status").equals(status);
-  }
+  if (status) query = query.where("status").equals(status);
 
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
 
-  query = query.sort(sort).skip(skip).limit(limitNum);
+  query = query
+    .sort(sort)
+    .skip((pageNum - 1) * limitNum)
+    .limit(limitNum);
 
-  const parsedOptions = {
+  populateReviewFields(query, {
     populateAll,
     populateUser: "false",
     populateTour,
@@ -802,13 +792,12 @@ const getMyReviews = catchAsync(async (req, res) => {
     populateFlagUsers: "false",
     populateEditHistory: "false",
     tourFields,
-  };
-
-  query = populateReviewFields(query, parsedOptions);
+  });
 
   const reviews = await query.lean();
-
-  const total = await Review.countDocuments({ user: req.user._id });
+  const total = await Review.countDocuments({ user: req.user._id }).setOptions({
+    _skipStatusFilter: true,
+  });
 
   res.status(200).json({
     status: "success",
@@ -848,7 +837,7 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
         .sort(sort)
         .limit(parseInt(limit, 10));
 
-      const parsedOptions = {
+      const reviews = await populateReviewFields(query, {
         populateAll: "false",
         populateUser,
         populateTour: "false",
@@ -857,15 +846,9 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
         populateFlagUsers: "false",
         populateEditHistory: "false",
         userFields,
-      };
+      }).lean();
 
-      const reviews = await populateReviewFields(query, parsedOptions).lean();
-
-      return {
-        tourId,
-        count: reviews.length,
-        reviews,
-      };
+      return { tourId, count: reviews.length, reviews };
     }),
   );
 
@@ -882,9 +865,7 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
 const getMyReviewForTour = catchAsync(async (req, res, next) => {
   const tourId = req.params.tourId || req.params.id;
 
-  if (!tourId) {
-    return next(new AppError("Tour ID is required", 400));
-  }
+  if (!tourId) return next(new AppError("Tour ID is required", 400));
 
   const review = await Review.getUserReviewForTourPopulated(
     req.user._id,
@@ -900,14 +881,9 @@ const getMyReviewForTour = catchAsync(async (req, res, next) => {
 const updateMyReview = catchAsync(async (req, res, next) => {
   const tourId = req.params.tourId || req.params.id;
 
-  if (!tourId) {
-    return next(new AppError("Tour ID is required", 400));
-  }
+  if (!tourId) return next(new AppError("Tour ID is required", 400));
 
-  const review = await Review.findOne({
-    user: req.user._id,
-    tour: tourId,
-  });
+  const review = await Review.findOne({ user: req.user._id, tour: tourId });
 
   if (!review) {
     return next(new AppError("You have not reviewed this tour yet", 404));
@@ -917,21 +893,25 @@ const updateMyReview = catchAsync(async (req, res, next) => {
     return next(new AppError("This review cannot be edited", 400));
   }
 
-  const newReview = req.body.review ?? review.review;
   const newRating = req.body.rating ?? review.rating;
 
   if (newRating < 1 || newRating > 5) {
     return next(new AppError("Rating must be between 1 and 5", 400));
   }
 
-  await review.editReview(newReview, newRating, req.user._id);
+  await review.editReview(
+    req.body.review ?? review.review,
+    newRating,
+    req.user._id,
+    {
+      title: req.body.title,
+      isRecommended: req.body.isRecommended,
+    },
+  );
 
   const populatedReview = await populateReviewFields(
     Review.findById(review._id),
-    {
-      populateUser: true,
-      populateTour: true,
-    },
+    { populateUser: true, populateTour: true },
   ).lean();
 
   res.status(200).json({
@@ -965,4 +945,6 @@ export {
   getBatchTourReviews,
   getMyReviewForTour,
   updateMyReview,
+  getModerationQueue,
+  hideReview,
 };
