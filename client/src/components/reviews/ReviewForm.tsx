@@ -156,11 +156,15 @@ function ReviewFormInner({
           value={reviewText}
           onChange={(e) => setReviewText(e.target.value)}
           placeholder="What did you enjoy most? What could be improved?"
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-gray-900"
         />
         <div className="mt-1 flex justify-between text-xs text-gray-500">
           <span>Minimum 5 characters</span>
-          <span className={reviewText.length > 500 ? "text-red-500" : ""}>
+          <span
+            className={
+              reviewText.length > 500 ? "text-red-500" : "text-gray-900"
+            }
+          >
             {reviewText.length} / 500
           </span>
         </div>
