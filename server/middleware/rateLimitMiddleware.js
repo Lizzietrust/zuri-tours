@@ -1,6 +1,33 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 /* ============================================================
+   DEV MODE DETECTION
+   ============================================================
+   In development we skip rate limiting entirely. It only hurts:
+   - React Strict Mode double-renders → 2x requests
+   - TanStack Query refetch on window focus → more requests
+   - Hot reloads fire requests faster than a real user
+   - You burn 100 requests in 30 seconds without doing anything
+
+   In production every limiter below is active and identical to
+   before. No behavior change when NODE_ENV === "production".
+   ============================================================ */
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+/**
+ * Wrapper around `rateLimit()` that returns a no-op middleware in dev.
+ * Usage: `const limiter = createLimiter({ windowMs, max, message });`
+ * In prod → real limiter. In dev → `(req, res, next) => next()`.
+ */
+function createLimiter(config) {
+  if (IS_DEV) {
+    return (req, res, next) => next();
+  }
+
+  return rateLimit(config);
+}
+
+/* ============================================================
    FACTORY FUNCTIONS
    ============================================================ */
 
@@ -10,13 +37,12 @@ export const createRateLimiter = (
   message = "Too many requests. Please try again later.",
   options = {},
 ) => {
+  if (IS_DEV) return (req, res, next) => next();
+
   return rateLimit({
     windowMs,
     max,
-    message: {
-      status: "error",
-      message,
-    },
+    message: { status: "error", message },
     standardHeaders: true,
     legacyHeaders: false,
     ...options,
@@ -29,13 +55,12 @@ export const createFailedAttemptLimiter = (
   message = "Too many failed attempts. Please try again later.",
   options = {},
 ) => {
+  if (IS_DEV) return (req, res, next) => next();
+
   return rateLimit({
     windowMs,
     max,
-    message: {
-      status: "error",
-      message,
-    },
+    message: { status: "error", message },
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true,
@@ -49,21 +74,15 @@ export const createUserRateLimiter = (
   message = "Too many requests. Please try again later.",
   options = {},
 ) => {
+  if (IS_DEV) return (req, res, next) => next();
+
   return rateLimit({
     windowMs,
     max,
-    message: {
-      status: "error",
-      message,
-    },
+    message: { status: "error", message },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-      // Prefer the authenticated user id; fall back to the IP.
-      // ipKeyGenerator normalizes IPv6 addresses so limits can't be
-      // trivially bypassed by rotating equivalent IPv6 strings.
-      return req.user?.id || ipKeyGenerator(req.ip);
-    },
+    keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
     ...options,
   });
 };
@@ -74,18 +93,15 @@ export const createSkipAuthLimiter = (
   message = "Too many requests. Please try again later.",
   options = {},
 ) => {
+  if (IS_DEV) return (req, res, next) => next();
+
   return rateLimit({
     windowMs,
     max,
-    message: {
-      status: "error",
-      message,
-    },
+    message: { status: "error", message },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => {
-      return !!req.user;
-    },
+    skip: (req) => !!req.user,
     ...options,
   });
 };
@@ -96,34 +112,28 @@ export const createAuthOnlyLimiter = (
   message = "Too many requests. Please try again later.",
   options = {},
 ) => {
+  if (IS_DEV) return (req, res, next) => next();
+
   return rateLimit({
     windowMs,
     max,
-    message: {
-      status: "error",
-      message,
-    },
+    message: { status: "error", message },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-      return req.user?.id || ipKeyGenerator(req.ip);
-    },
-    skip: (req) => {
-      return !req.user;
-    },
+    keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
+    skip: (req) => !req.user,
     ...options,
   });
 };
 
-export const createPerUserLimiter = (windowMs, max, message) => {
-  return createUserRateLimiter(windowMs, max, message);
-};
+export const createPerUserLimiter = (windowMs, max, message) =>
+  createUserRateLimiter(windowMs, max, message);
 
 /* ============================================================
    PRE-CONFIGURED LIMITERS
    ============================================================ */
 
-export const generalLimiter = rateLimit({
+export const generalLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: {
@@ -136,7 +146,7 @@ export const generalLimiter = rateLimit({
 
 export const apiLimiter = generalLimiter;
 
-export const registerLimiter = rateLimit({
+export const registerLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: {
@@ -148,7 +158,7 @@ export const registerLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
-export const loginLimiter = rateLimit({
+export const loginLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: {
@@ -165,7 +175,7 @@ export const strictLoginLimiter = createFailedAttemptLimiter(
   "Too many failed login attempts. Please try again in 15 minutes.",
 );
 
-export const resetPasswordLimiter = rateLimit({
+export const resetPasswordLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
   max: 3,
   message: {
@@ -177,7 +187,7 @@ export const resetPasswordLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const emailLimiter = rateLimit({
+export const emailLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 20,
   message: {
@@ -188,7 +198,7 @@ export const emailLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const passwordChangeLimiter = rateLimit({
+export const passwordChangeLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: {
@@ -199,7 +209,7 @@ export const passwordChangeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const tourCreationLimiter = rateLimit({
+export const tourCreationLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: {
@@ -210,7 +220,7 @@ export const tourCreationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const tourUpdateLimiter = rateLimit({
+export const tourUpdateLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 30,
   message: {
@@ -221,7 +231,7 @@ export const tourUpdateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const tourDeletionLimiter = rateLimit({
+export const tourDeletionLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: {
@@ -232,7 +242,7 @@ export const tourDeletionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const reviewCreationLimiter = rateLimit({
+export const reviewCreationLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 20,
   message: {
@@ -243,7 +253,7 @@ export const reviewCreationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const reviewUpdateLimiter = rateLimit({
+export const reviewUpdateLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 15,
   message: {
@@ -254,7 +264,7 @@ export const reviewUpdateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const userUpdateLimiter = rateLimit({
+export const userUpdateLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 30,
   message: {
@@ -265,7 +275,7 @@ export const userUpdateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const profileUpdateLimiter = rateLimit({
+export const profileUpdateLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: {
@@ -276,7 +286,7 @@ export const profileUpdateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const searchLimiter = rateLimit({
+export const searchLimiter = createLimiter({
   windowMs: 60 * 1000,
   max: 50,
   message: {
@@ -287,7 +297,7 @@ export const searchLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const advancedSearchLimiter = rateLimit({
+export const advancedSearchLimiter = createLimiter({
   windowMs: 60 * 1000,
   max: 20,
   message: {
@@ -298,7 +308,7 @@ export const advancedSearchLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const adminLimiter = rateLimit({
+export const adminLimiter = createLimiter({
   windowMs: 60 * 1000,
   max: 50,
   message: {
@@ -309,7 +319,7 @@ export const adminLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const bulkOperationLimiter = rateLimit({
+export const bulkOperationLimiter = createLimiter({
   windowMs: 60 * 1000,
   max: 10,
   message: {
@@ -320,7 +330,7 @@ export const bulkOperationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const strictLimiter = rateLimit({
+export const strictLimiter = createLimiter({
   windowMs: 60 * 1000,
   max: 5,
   message: {
