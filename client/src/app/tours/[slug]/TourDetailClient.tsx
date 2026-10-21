@@ -1,22 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTour } from "@/hooks/useTours";
 import StarRating from "@/components/reviews/StarRating";
 import RatingDistribution from "@/components/reviews/RatingDistribution";
 import ReviewForm from "@/components/reviews/ReviewForm";
 import ReviewList from "@/components/reviews/ReviewList";
+import BookingCard from "@/components/tours/BookingCard";
 import { imageUrl } from "@/services/tours";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { formatDistance } from "@/lib/geo";
 import type { Tour } from "@/types";
 
-/**
- * Inline SVG placeholder — no network request, no 404.
- * Neutral gray gradient with a simple mountain/sun icon.
- */
 const FALLBACK_IMG =
   "data:image/svg+xml;charset=UTF-8," +
   encodeURIComponent(
@@ -169,141 +166,6 @@ function FactTile({
   );
 }
 
-/* ---------- booking sidebar ---------- */
-
-function BookingCard({ tour }: { tour: Tour }) {
-  const hasDiscount =
-    typeof tour.priceDiscount === "number" &&
-    tour.priceDiscount > 0 &&
-    tour.priceDiscount < tour.price;
-
-  const discountPercent = hasDiscount
-    ? Math.round(((tour.price - tour.priceDiscount!) / tour.price) * 100)
-    : 0;
-
-  const [guests, setGuests] = useState(2);
-  const [date, setDate] = useState(tour.startDates?.[0]?.slice(0, 10) ?? "");
-
-  const unitPrice = hasDiscount ? tour.priceDiscount! : tour.price;
-  const totalPrice = unitPrice * guests;
-
-  const handleBook = (e: FormEvent) => {
-    e.preventDefault();
-    alert(
-      `Booking ${guests} ${guests === 1 ? "guest" : "guests"} for "${
-        tour.name
-      }"${date ? ` on ${date}` : ""} — ${formatCurrency(totalPrice)}`,
-    );
-  };
-
-  return (
-    <form
-      onSubmit={handleBook}
-      className="sticky top-24 space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-lg shadow-emerald-900/5"
-    >
-      <div className="flex items-end justify-between">
-        <div className="flex flex-col">
-          {hasDiscount && (
-            <span className="text-sm font-medium text-gray-400 line-through">
-              {formatCurrency(tour.price)}
-            </span>
-          )}
-          <span className="text-3xl font-extrabold text-emerald-700">
-            {formatCurrency(unitPrice)}
-          </span>
-          <span className="text-xs tracking-wide text-gray-400 uppercase">
-            per person
-          </span>
-        </div>
-        {hasDiscount && (
-          <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
-            −{discountPercent}%
-          </span>
-        )}
-      </div>
-
-      <div>
-        <label
-          htmlFor="booking-date"
-          className="mb-1 block text-xs font-semibold text-gray-600"
-        >
-          Select date
-        </label>
-        <input
-          id="booking-date"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          min={new Date().toISOString().slice(0, 10)}
-          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
-        />
-      </div>
-
-      <div>
-        <label
-          htmlFor="booking-guests"
-          className="mb-1 block text-xs font-semibold text-gray-600"
-        >
-          Guests
-        </label>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setGuests((g) => Math.max(1, g - 1))}
-            aria-label="Decrease guests"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-lg font-semibold text-gray-700 transition hover:border-emerald-300 hover:bg-emerald-50"
-          >
-            −
-          </button>
-          <input
-            id="booking-guests"
-            type="number"
-            min={1}
-            max={tour.maxGroupSize}
-            value={guests}
-            onChange={(e) =>
-              setGuests(
-                Math.min(
-                  tour.maxGroupSize,
-                  Math.max(1, Number(e.target.value) || 1),
-                ),
-              )
-            }
-            className="w-16 rounded-lg border border-gray-200 py-2 text-center text-sm font-semibold focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-          />
-          <button
-            type="button"
-            onClick={() => setGuests((g) => Math.min(tour.maxGroupSize, g + 1))}
-            aria-label="Increase guests"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-lg font-semibold text-gray-700 transition hover:border-emerald-300 hover:bg-emerald-50"
-          >
-            +
-          </button>
-          <span className="text-xs text-gray-400">max {tour.maxGroupSize}</span>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3">
-        <span className="text-sm font-semibold text-emerald-900">Total</span>
-        <span className="text-xl font-extrabold text-emerald-700">
-          {formatCurrency(totalPrice)}
-        </span>
-      </div>
-
-      <button
-        type="submit"
-        className="w-full rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
-      >
-        Book now
-      </button>
-
-      <p className="text-center text-xs text-gray-400">
-        Free cancellation up to 24h before
-      </p>
-    </form>
-  );
-}
-
 /* ---------- states ---------- */
 
 function TourDetailSkeleton() {
@@ -383,13 +245,6 @@ export default function TourDetailClient({ slug }: { slug: string }) {
   const router = useRouter();
   const { data, isLoading, isError, error, refetch } = useTour(slug);
 
-  /**
-   * Shape-safety:
-   * - If `useTour` returns the Tour directly → `data`
-   * - If it returns `{ data: { tour } }` → `data.data.tour`
-   * - If it returns `{ data: Tour }` → `data.data`
-   * We try all three so this works with either hook shape.
-   */
   const tour: Tour | undefined = useMemo(() => {
     if (!data) return undefined;
     const anyData = data as unknown as {
@@ -448,7 +303,7 @@ export default function TourDetailClient({ slug }: { slug: string }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ============ HERO (same gradient + blur circles as ToursPage) ============ */}
+      {/* ============ HERO ============ */}
       <section className="relative overflow-hidden border-b border-gray-100 bg-linear-to-br from-emerald-50 via-white to-sky-50">
         <div
           aria-hidden
@@ -608,7 +463,7 @@ export default function TourDetailClient({ slug }: { slug: string }) {
               </div>
             )}
 
-            {/* Reviews — wrapped in the same card language as ToursPage */}
+            {/* Reviews */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-lg shadow-emerald-900/5">
               <h2 className="text-2xl font-extrabold text-gray-900">
                 Traveler Reviews
@@ -632,7 +487,7 @@ export default function TourDetailClient({ slug }: { slug: string }) {
             </div>
           </div>
 
-          {/* Right column */}
+          {/* Right column — booking */}
           <div>
             <BookingCard tour={tour} />
           </div>
