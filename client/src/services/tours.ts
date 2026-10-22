@@ -3,16 +3,38 @@ import { distanceKm, getTourCoords, type LatLng } from "@/lib/geo";
 import { geocodeService } from "@/services/geocode";
 import type { Tour, TourQueryParams } from "@/types";
 
-const API_ORIGIN =
+const PLACEHOLDER = "/placeholder-tour.jpg";
+
+const API_ORIGIN = (
   process.env.NEXT_PUBLIC_API_ORIGIN ??
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v\d+\/?$/, "") ??
-  "";
+  ""
+).replace(/\/$/, "");
 
-export const imageUrl = (filename?: string) => {
-  if (!filename) return "/placeholder-tour.jpg";
-  if (filename === "default.jpg") return "/placeholder-tour.jpg";
-  if (filename.startsWith("http")) return filename;
-  return `${API_ORIGIN}/img/tours/${filename}`;
+if (process.env.NODE_ENV === "development" && !API_ORIGIN) {
+  console.warn(
+    "[imageUrl] NEXT_PUBLIC_API_ORIGIN / NEXT_PUBLIC_API_URL is not set — tour images will not load.",
+  );
+}
+
+export const imageUrl = (filename?: string | null): string => {
+  if (!filename) return PLACEHOLDER;
+
+  const trimmed = String(filename).trim();
+  if (!trimmed) return PLACEHOLDER;
+
+  if (trimmed === "default.jpg" || trimmed === "placeholder-tour.jpg") {
+    return PLACEHOLDER;
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  if (/^(data:|blob:)/i.test(trimmed)) return trimmed;
+
+  if (trimmed.startsWith("/")) return trimmed;
+
+  const clean = trimmed.replace(/^\/+/, "");
+  return `${API_ORIGIN}/img/tours/${clean}`;
 };
 
 /* ============================================================
@@ -61,12 +83,6 @@ export type NearbySort = "distance" | "price" | "ratingsAverage" | "duration";
 export interface NearbyTourParams {
   lat: number;
   lng: number;
-  /**
-   * Search radius in km.
-   * Defaults applied by the service: 100 for place-name search, 50 for
-   * direct lat/lng. Marked optional so callers (e.g. `useToursByLocation`)
-   * can omit it and rely on the defaults.
-   */
   radius?: number;
   sortBy?: NearbySort;
   difficulty?: string;
@@ -118,11 +134,6 @@ function extractTour(raw: BackendSingleResponse | null): Tour | null {
   return null;
 }
 
-/**
- * Normalise the distance on a tour to kilometres so the UI never has to guess
- * the unit. Prefers the backend's `distanceInMeters`; falls back to computing
- * it from the tour's coordinates.
- */
 function withDistanceKm(tour: Tour, origin: LatLng): Tour {
   let km: number | undefined;
 
@@ -162,10 +173,6 @@ export const tourService = {
     };
   },
 
-  /**
-   * Geo search. The backend does the filtering, sorting and pagination
-   * (`GET /tours?lat&lng&radius&unit&sortBy&page&limit`).
-   */
   async getNearby(params: NearbyTourParams): Promise<NearbyTourResult> {
     const { data } = await api.get<BackendListResponse>("/tours", {
       params: {
@@ -216,7 +223,6 @@ export const tourService = {
     return { status: data.status, data: { tour } };
   },
 
-  /** Server-side fetch for generateMetadata. */
   async getBySlugServer(slug: string, revalidate = 300): Promise<Tour | null> {
     const url = `${process.env.NEXT_PUBLIC_API_URL}/tours/${encodeURIComponent(
       slug,
@@ -231,13 +237,6 @@ export const tourService = {
     }
   },
 
-  /**
-   * Search by a place name (geocoded server-side) OR raw coords.
-   * Returns the same shape as getNearby so the map/list can consume it.
-   *
-   * Note: `radius` is destructured out of `params` before spreading so an
-   * explicit `radius: undefined` from the caller can't clobber the default.
-   */
   async getByLocation(
     query: string,
     params: Omit<NearbyTourParams, "lat" | "lng"> = {},
@@ -254,7 +253,6 @@ export const tourService = {
   },
 };
 
-/** Build a query string — kept for server-side usage. */
 export function buildTourQueryString(params: TourQueryParams = {}): string {
   const search = new URLSearchParams();
 
