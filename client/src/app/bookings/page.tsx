@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useState } from "react";
 import { useMyBookings, useCancelBooking } from "@/hooks/useBookings";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { imageUrl } from "@/services/tours";
 import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
+import TourImage from "@/components/ui/TourImage";
 
 type StatusFilter =
   | "all"
@@ -48,7 +47,7 @@ export default function MyBookingsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Hero header — same gradient as tour page */}
+      {/* Hero header */}
       <section className="relative overflow-hidden border-b border-gray-100 bg-linear-to-br from-emerald-50 via-white to-sky-50">
         <div
           aria-hidden
@@ -69,7 +68,6 @@ export default function MyBookingsPage() {
         </div>
       </section>
 
-      {/* Main content */}
       <section className="mx-auto max-w-5xl px-6 py-10">
         {/* Filter bar */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -94,7 +92,7 @@ export default function MyBookingsPage() {
           </select>
         </div>
 
-        {/* Loading skeleton */}
+        {/* Loading */}
         {isLoading && (
           <div className="mt-6 space-y-4">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -113,7 +111,7 @@ export default function MyBookingsPage() {
           </div>
         )}
 
-        {/* Error banner */}
+        {/* Error */}
         {isError && (
           <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -137,7 +135,7 @@ export default function MyBookingsPage() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty */}
         {!isLoading && !isError && bookings.length === 0 && (
           <div className="mt-10 rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-lg shadow-emerald-900/5">
             <EmptyState
@@ -156,7 +154,7 @@ export default function MyBookingsPage() {
           </div>
         )}
 
-        {/* Booking list */}
+        {/* List */}
         {bookings.length > 0 && (
           <div className="mt-6 space-y-4">
             {bookings.map((b) => {
@@ -169,24 +167,28 @@ export default function MyBookingsPage() {
                   className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg shadow-emerald-900/5 transition hover:border-emerald-200 sm:flex-row"
                 >
                   <div className="relative h-32 w-full shrink-0 overflow-hidden rounded-xl bg-gray-100 sm:h-24 sm:w-32">
-                    <Image
-                      src={imageUrl(tour.imageCover)}
-                      alt={tour.name}
-                      fill
+                    <TourImage
+                      src={tour?.imageCover}
+                      alt={tour?.name ?? "Tour"}
                       sizes="(max-width: 640px) 100vw, 128px"
-                      className="object-cover"
                     />
                   </div>
 
                   <div className="flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <Link
-                          href={`/tours/${tour.slug}`}
-                          className="text-lg font-bold text-gray-900 transition hover:text-emerald-700"
-                        >
-                          {tour.name}
-                        </Link>
+                        {tour?.slug ? (
+                          <Link
+                            href={`/tours/${tour.slug}`}
+                            className="text-lg font-bold text-gray-900 transition hover:text-emerald-700"
+                          >
+                            {tour.name}
+                          </Link>
+                        ) : (
+                          <span className="text-lg font-bold text-gray-900">
+                            {tour?.name ?? "Tour"}
+                          </span>
+                        )}
                         <p className="text-xs text-gray-500">
                           Ref: {b.bookingReference}
                         </p>
