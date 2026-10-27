@@ -3,12 +3,7 @@ import type { Tour } from "@/types";
 
 /* ---------- Types ---------- */
 
-export type BookingStatus =
-  | "pending"
-  | "confirmed"
-  | "cancelled"
-  | "completed"
-  | "refunded";
+export type BookingStatus = "pending" | "confirmed" | "cancelled" | "completed";
 
 export type PaymentStatus = "unpaid" | "paid" | "refunded" | "failed";
 
