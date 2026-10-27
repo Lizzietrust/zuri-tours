@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMyBookings, useCancelBooking } from "@/hooks/useBookings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import Skeleton from "@/components/ui/Skeleton";
@@ -10,9 +10,20 @@ import TourImage from "@/components/ui/TourImage";
 
 type StatusFilter = "all" | "pending" | "confirmed" | "cancelled" | "completed";
 
+type PendingCancel = {
+  id: string;
+  tourName: string;
+  startDate: string;
+  price: number;
+  paymentStatus: "unpaid" | "paid" | "refunded" | "failed";
+};
+
 export default function MyBookingsPage() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(
+    null,
+  );
 
   const { data, isLoading, isError, error, refetch } = useMyBookings(
     page,
@@ -30,13 +41,29 @@ export default function MyBookingsPage() {
     /too many requests|429/i.test(errorMessage) ||
     (error as { statusCode?: number })?.statusCode === 429;
 
-  const handleCancel = (bookingId: string) => {
-    const reason = window.prompt(
-      "Reason for cancellation (optional):",
-      "Change of plans",
+  const openCancelModal = (b: (typeof bookings)[number]) => {
+    setPendingCancel({
+      id: b._id,
+      tourName: b.tour?.name ?? "this tour",
+      startDate: b.startDate,
+      price: b.price,
+      paymentStatus: b.paymentStatus,
+    });
+  };
+
+  const closeCancelModal = () => {
+    if (cancelMutation.isPending) return;
+    setPendingCancel(null);
+  };
+
+  const confirmCancel = (reason: string) => {
+    if (!pendingCancel) return;
+    cancelMutation.mutate(
+      { id: pendingCancel.id, reason },
+      {
+        onSuccess: () => setPendingCancel(null),
+      },
     );
-    if (reason === null) return;
-    cancelMutation.mutate({ id: bookingId, reason });
   };
 
   return (
@@ -228,7 +255,7 @@ export default function MyBookingsPage() {
 
                       {showCancelButton && (
                         <button
-                          onClick={() => handleCancel(b._id)}
+                          onClick={() => openCancelModal(b)}
                           className="rounded-lg border-2 border-rose-300 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:border-rose-500 hover:bg-rose-50"
                         >
                           Cancel booking
@@ -265,6 +292,226 @@ export default function MyBookingsPage() {
           </div>
         )}
       </section>
+
+      {/* Cancel confirmation modal */}
+      <CancelBookingModal
+        open={pendingCancel !== null}
+        booking={pendingCancel}
+        isSubmitting={cancelMutation.isPending}
+        onClose={closeCancelModal}
+        onConfirm={confirmCancel}
+      />
+    </div>
+  );
+}
+
+/* ============================================================
+   Cancel confirmation modal
+   ============================================================ */
+function CancelBookingModal({
+  open,
+  booking,
+  isSubmitting,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  booking: PendingCancel | null;
+  isSubmitting: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("Change of plans");
+  const [reasonForId, setReasonForId] = useState<string | null>(null);
+
+  const titleId = useId();
+  const descId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  if (booking && reasonForId !== booking.id) {
+    setReasonForId(booking.id);
+    setReason("Change of plans");
+  }
+
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const t = window.setTimeout(() => cancelBtnRef.current?.focus(), 0);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSubmitting) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = root.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = prevOverflow;
+      previouslyFocused.current?.focus?.();
+    };
+  }, [open, isSubmitting, onClose]);
+
+  if (!open || !booking) return null;
+
+  const willRefund = booking.paymentStatus === "paid";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="presentation"
+    >
+      {/* Backdrop */}
+      <div
+        aria-hidden
+        onClick={() => !isSubmitting && onClose()}
+        className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"
+      />
+
+      {/* Dialog */}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
+        className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5"
+      >
+        <div className="p-6">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M8.485 2.495a1.75 1.75 0 0 1 3.03 0l6.28 10.876A1.75 1.75 0 0 1 16.28 16H3.72a1.75 1.75 0 0 1-1.515-2.629L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div>
+              <h2 id={titleId} className="text-lg font-bold text-gray-900">
+                Cancel this booking?
+              </h2>
+              <p id={descId} className="mt-1 text-sm text-gray-600">
+                This will release your spot for{" "}
+                <span className="font-semibold text-gray-900">
+                  {booking.tourName}
+                </span>{" "}
+                on {formatDate(booking.startDate)}.
+              </p>
+            </div>
+          </div>
+
+          {/* Refund notice */}
+          {willRefund && (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              A refund of{" "}
+              <span className="font-semibold">
+                {formatCurrency(booking.price)}
+              </span>{" "}
+              will be issued to your original payment method shortly.
+            </div>
+          )}
+
+          {/* Reason field */}
+          <div className="mt-4">
+            <label
+              htmlFor="cancel-reason"
+              className="block text-sm font-semibold text-gray-700"
+            >
+              Reason{" "}
+              <span className="font-normal text-gray-500">(optional)</span>
+            </label>
+            <textarea
+              id="cancel-reason"
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={isSubmitting}
+              maxLength={500}
+              className="mt-1 w-full resize-none rounded-lg border-2 border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-gray-50 disabled:text-gray-500"
+              placeholder="Change of plans"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex flex-col-reverse gap-2 border-t border-gray-100 bg-gray-50 p-4 sm:flex-row sm:justify-end">
+          <button
+            ref={cancelBtnRef}
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="rounded-lg border-2 border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition hover:border-gray-400 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Keep booking
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(reason.trim())}
+            disabled={isSubmitting}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isSubmitting && (
+              <svg
+                className="h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  className="opacity-25"
+                />
+                <path
+                  d="M22 12a10 10 0 0 1-10 10"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+            {isSubmitting ? "Cancelling…" : "Yes, cancel booking"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
