@@ -7,6 +7,8 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import TourImage from "@/components/ui/TourImage";
+import BookingDetailsModal from "@/components/bookings/BookingDetailsModal";
+import type { Booking } from "@/services/bookings";
 
 type StatusFilter = "all" | "pending" | "confirmed" | "cancelled" | "completed";
 
@@ -24,6 +26,7 @@ export default function MyBookingsPage() {
   const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(
     null,
   );
+  const [selected, setSelected] = useState<Booking | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useMyBookings(
     page,
@@ -41,10 +44,13 @@ export default function MyBookingsPage() {
     /too many requests|429/i.test(errorMessage) ||
     (error as { statusCode?: number })?.statusCode === 429;
 
-  const openCancelModal = (b: (typeof bookings)[number]) => {
+  const openCancelModal = (b: Booking | PendingCancel) => {
     setPendingCancel({
-      id: b._id,
-      tourName: b.tour?.name ?? "this tour",
+      id: "_id" in b ? b._id : b.id,
+      tourName:
+        "_id" in b
+          ? (b.tour?.name ?? "this tour")
+          : (b.tourName ?? "this tour"),
       startDate: b.startDate,
       price: b.price,
       paymentStatus: b.paymentStatus,
@@ -253,6 +259,15 @@ export default function MyBookingsPage() {
                         💳 {b.paymentStatus}
                       </span>
 
+                      {/* NEW: View details (opens modal) */}
+                      <button
+                        type="button"
+                        onClick={() => setSelected(b)}
+                        className="rounded-lg border-2 border-emerald-300 px-3 py-1 text-xs font-semibold text-emerald-800 transition hover:border-emerald-500 hover:bg-emerald-50"
+                      >
+                        View details
+                      </button>
+
                       {showCancelButton && (
                         <button
                           onClick={() => openCancelModal(b)}
@@ -293,7 +308,18 @@ export default function MyBookingsPage() {
         )}
       </section>
 
-      {/* Cancel confirmation modal */}
+      {/* Booking details modal */}
+      <BookingDetailsModal
+        open={selected !== null}
+        booking={selected}
+        onClose={() => setSelected(null)}
+        onRequestCancel={(b) => {
+          setSelected(null);
+          openCancelModal(b);
+        }}
+      />
+
+      {/* Cancel confirmation modal (unchanged) */}
       <CancelBookingModal
         open={pendingCancel !== null}
         booking={pendingCancel}
@@ -389,14 +415,12 @@ function CancelBookingModal({
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       role="presentation"
     >
-      {/* Backdrop */}
       <div
         aria-hidden
         onClick={() => !isSubmitting && onClose()}
         className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"
       />
 
-      {/* Dialog */}
       <div
         ref={dialogRef}
         role="dialog"
@@ -435,7 +459,6 @@ function CancelBookingModal({
             </div>
           </div>
 
-          {/* Refund notice */}
           {willRefund && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
               A refund of{" "}
@@ -446,7 +469,6 @@ function CancelBookingModal({
             </div>
           )}
 
-          {/* Reason field */}
           <div className="mt-4">
             <label
               htmlFor="cancel-reason"
@@ -468,7 +490,6 @@ function CancelBookingModal({
           </div>
         </div>
 
-        {/* Footer */}
         <div className="flex flex-col-reverse gap-2 border-t border-gray-100 bg-gray-50 p-4 sm:flex-row sm:justify-end">
           <button
             ref={cancelBtnRef}
