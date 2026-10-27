@@ -98,12 +98,12 @@ export default function BookingDetailsModal({
           Details for booking {booking.bookingReference}
         </p>
 
-        {/* Floating close button (over the hero image) */}
+        {/* Floating close button (top-left — avoids collision with status badges top-right) */}
         <button
           ref={closeBtnRef}
           type="button"
           onClick={onClose}
-          className="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-800 shadow-md ring-1 ring-black/10 backdrop-blur transition hover:bg-white"
+          className="absolute top-3 left-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-800 shadow-md ring-1 ring-black/10 backdrop-blur transition hover:bg-white"
           aria-label="Close booking details"
         >
           <svg
