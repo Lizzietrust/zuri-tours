@@ -17,7 +17,7 @@ export const bookingKeys = {
 };
 
 /* ============================================================
-   CREATE — returns authorization URL to redirect to Paystack
+   CREATE
    ============================================================ */
 export function useCreateBooking() {
   const queryClient = useQueryClient();
@@ -36,7 +36,7 @@ export function useCreateBooking() {
 }
 
 /* ============================================================
-   VERIFY PAYMENT (called on the /bookings/callback page)
+   VERIFY PAYMENT
    ============================================================ */
 export function useVerifyPayment(reference: string | null) {
   const queryClient = useQueryClient();
