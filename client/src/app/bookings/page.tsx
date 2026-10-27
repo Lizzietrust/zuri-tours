@@ -8,13 +8,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 import TourImage from "@/components/ui/TourImage";
 
-type StatusFilter =
-  | "all"
-  | "pending"
-  | "confirmed"
-  | "cancelled"
-  | "completed"
-  | "refunded";
+type StatusFilter = "all" | "pending" | "confirmed" | "cancelled" | "completed";
 
 export default function MyBookingsPage() {
   const [page, setPage] = useState(1);
@@ -88,7 +82,6 @@ export default function MyBookingsPage() {
             <option value="pending">Pending</option>
             <option value="cancelled">Cancelled</option>
             <option value="completed">Completed</option>
-            <option value="refunded">Refunded</option>
           </select>
         </div>
 
@@ -199,8 +192,7 @@ export default function MyBookingsPage() {
                             ? "bg-emerald-100 text-emerald-800"
                             : b.status === "pending"
                               ? "bg-amber-100 text-amber-800"
-                              : b.status === "cancelled" ||
-                                  b.status === "refunded"
+                              : b.status === "cancelled"
                                 ? "bg-rose-100 text-rose-800"
                                 : "bg-gray-100 text-gray-700"
                         }`}
