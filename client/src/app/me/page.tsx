@@ -56,6 +56,12 @@ type ExtendedUser = {
 /* ------------------------------------------------------------------ */
 const QUICK_LINKS = [
   {
+    href: "/bookings",
+    icon: "🎟️",
+    title: "My bookings",
+    body: "View and manage your tour bookings.",
+  },
+  {
     href: "/me/reviews",
     icon: "⭐",
     title: "My reviews",
@@ -431,10 +437,10 @@ export default function MePage() {
                     </Link>
                   ) : (
                     <Link
-                      href="/tours"
+                      href="/bookings"
                       className="mt-6 inline-flex items-center justify-center rounded-xl border border-emerald-600 bg-white px-5 py-2.5 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
                     >
-                      Browse tours
+                      🎟️ View my bookings
                     </Link>
                   )}
                 </aside>
@@ -584,7 +590,7 @@ export default function MePage() {
               <h2 className="mt-12 text-xl font-bold text-gray-900">
                 Quick links
               </h2>
-              <div className="mt-4 grid gap-6 md:grid-cols-3">
+              <div className="mt-4 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 {QUICK_LINKS.map((l) => (
                   <Link
                     key={l.href}
