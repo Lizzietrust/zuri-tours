@@ -314,7 +314,7 @@ export default function MePage() {
                   <h1 className="truncate text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">
                     Welcome back,{" "}
                     <span className="bg-linear-to-r from-emerald-600 to-sky-600 bg-clip-text text-transparent">
-                      {user.name?.split(" ")[0] || "traveler"}
+                      {user.name || "traveler"}
                     </span>
                   </h1>
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
