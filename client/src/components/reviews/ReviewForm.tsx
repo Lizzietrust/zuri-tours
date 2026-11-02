@@ -2,21 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { reviewService } from "@/services/reviews";
+import {
+  useCreateReview,
+  useMyReviewForTour,
+  useUpdateMyReview,
+} from "@/hooks/useReviews";
 import { useAuth } from "@/hooks/useAuth";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import StarInput from "./StarInput";
+import type { CreateReviewInput } from "@/services/reviews";
 import type { Review } from "@/types";
-
-type ReviewFormValues = {
-  rating: number;
-  title: string;
-  review: string;
-  isRecommended: boolean;
-};
 
 function ReviewFormInner({
   tourId,
@@ -25,8 +22,6 @@ function ReviewFormInner({
   tourId: string;
   initialReview: Review | null;
 }) {
-  const queryClient = useQueryClient();
-
   const [rating, setRating] = useState(initialReview?.rating ?? 0);
   const [title, setTitle] = useState(initialReview?.title ?? "");
   const [reviewText, setReviewText] = useState(initialReview?.review ?? "");
@@ -36,48 +31,8 @@ function ReviewFormInner({
 
   const isEditing = !!initialReview;
 
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ["reviews", tourId] });
-    queryClient.invalidateQueries({ queryKey: ["my-review", tourId] });
-    queryClient.invalidateQueries({ queryKey: ["review-stats", tourId] });
-    queryClient.invalidateQueries({ queryKey: ["tour", tourId] });
-  };
-
-  const createMutation = useMutation({
-    mutationFn: (input: ReviewFormValues) =>
-      reviewService.create(tourId, input),
-    onSuccess: () => {
-      invalidateAll();
-      toast.success("Review published!", {
-        description: "Thanks for sharing — your feedback is now live.",
-      });
-      setRating(0);
-      setTitle("");
-      setReviewText("");
-      setIsRecommended(true);
-    },
-    onError: (err: { message?: string }) => {
-      toast.error("Failed to submit review", {
-        description: err.message || "Please try again.",
-      });
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: (input: Partial<ReviewFormValues>) =>
-      reviewService.updateMy(tourId, input),
-    onSuccess: () => {
-      invalidateAll();
-      toast.success("Review updated!", {
-        description: "Your changes are live.",
-      });
-    },
-    onError: (err: { message?: string }) => {
-      toast.error("Failed to update review", {
-        description: err.message || "Please try again.",
-      });
-    },
-  });
+  const createMutation = useCreateReview(tourId);
+  const updateMutation = useUpdateMyReview(tourId);
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
@@ -97,15 +52,25 @@ function ReviewFormInner({
       return;
     }
 
-    const payload: ReviewFormValues = {
+    const payload: CreateReviewInput = {
       rating,
       title: title.trim(),
       review: reviewText.trim(),
       isRecommended,
     };
 
-    if (isEditing) updateMutation.mutate(payload);
-    else createMutation.mutate(payload);
+    if (isEditing) {
+      updateMutation.mutate(payload);
+    } else {
+      createMutation.mutate(payload, {
+        onSuccess: () => {
+          setRating(0);
+          setTitle("");
+          setReviewText("");
+          setIsRecommended(true);
+        },
+      });
+    }
   };
 
   return (
@@ -192,13 +157,10 @@ function ReviewFormInner({
 export default function ReviewForm({ tourId }: { tourId: string }) {
   const { isAuthenticated } = useAuth();
 
-  const { data: myReview, isLoading: myReviewLoading } = useQuery({
-    queryKey: ["my-review", tourId],
-    queryFn: () => reviewService.getMyReviewForTour(tourId),
-    enabled: isAuthenticated && !!tourId,
-    retry: false,
-    staleTime: 1000 * 60,
-  });
+  const { data: myReview, isLoading: myReviewLoading } = useMyReviewForTour(
+    tourId,
+    isAuthenticated,
+  );
 
   if (!isAuthenticated) {
     return (
