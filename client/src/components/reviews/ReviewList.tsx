@@ -1,8 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { reviewService } from "@/services/reviews";
+import { useTourReviews } from "@/hooks/useReviews";
 import ReviewCard from "./ReviewCard";
 import EmptyState from "@/components/ui/EmptyState";
 import Skeleton from "@/components/ui/Skeleton";
@@ -13,13 +12,10 @@ export default function ReviewList({ tourId }: { tourId: string }) {
   const [sort, setSort] = useState("-createdAt");
   const limit = 5;
 
-  const { data, isLoading, isError, error, isFetching } = useQuery({
-    queryKey: ["reviews", tourId, { page, sort }],
-    queryFn: () => reviewService.getForTour(tourId, { page, limit, sort }),
-    enabled: !!tourId,
-    placeholderData: (prev) => prev,
-    staleTime: 1000 * 60,
-  });
+  const { data, isLoading, isError, error, isFetching } = useTourReviews(
+    tourId,
+    { page, limit, sort },
+  );
 
   const reviews = (data?.data?.reviews || []) as Review[];
   const total = data?.total ?? 0;
