@@ -15,6 +15,64 @@ export interface UpdateReviewInput {
   isRecommended?: boolean;
 }
 
+/* ---------- "My reviews" types ---------- */
+
+export interface MyReviewTour {
+  _id: string;
+  name: string;
+  slug?: string;
+  price?: number;
+  duration?: number;
+  difficulty?: string;
+  imageCover?: string;
+  ratingsAverage?: number;
+  ratingsQuantity?: number;
+}
+
+export interface MyReview {
+  _id: string;
+  rating: number;
+  title?: string;
+  review: string;
+  isRecommended?: boolean;
+  isVerifiedPurchase?: boolean;
+  status: string;
+  needsModeration?: boolean;
+  helpfulCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+  editHistory?: { review?: string; rating?: number; editedAt?: string }[];
+  response?: {
+    text?: string;
+    respondedAt?: string;
+    respondedBy?: { name?: string; role?: string } | string;
+  };
+  tour: MyReviewTour | string | null;
+}
+
+export interface MyReviewsParams {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  status?: string;
+}
+
+export interface MyReviewsPage {
+  reviews: MyReview[];
+  total: number;
+  page: number;
+  pages: number;
+}
+
+type MyReviewsApiResponse = {
+  status: string;
+  results: number;
+  total: number;
+  page: number;
+  pages: number;
+  data: { reviews: MyReview[] };
+};
+
 type TourReviewsResponse = {
   status: string;
   results: number;
@@ -61,6 +119,29 @@ export const reviewService = {
       page: data.page ?? 1,
       pages: data.pages ?? 1,
       data: { reviews: data.data.reviews || [] },
+    };
+  },
+
+  /** Every review the logged-in user has written, across all tours. */
+  async getMine(params?: MyReviewsParams): Promise<MyReviewsPage> {
+    const { data } = await api.get<MyReviewsApiResponse>(
+      "/reviews/my-reviews",
+      {
+        params: {
+          ...params,
+          populateTour: "true",
+          populateResponseUser: "true",
+        },
+      },
+    );
+
+    const reviews = data.data?.reviews ?? [];
+
+    return {
+      reviews,
+      total: data.total ?? reviews.length,
+      page: data.page ?? 1,
+      pages: data.pages ?? 1,
     };
   },
 
