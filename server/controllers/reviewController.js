@@ -761,18 +761,11 @@ const getTourReviews = catchAsync(async (req, res) => {
   });
 });
 
+const flag = (v, fallback = false) =>
+  v === undefined ? fallback : v === true || v === "true";
+
 const getMyReviews = catchAsync(async (req, res) => {
-  const {
-    page = 1,
-    limit = 10,
-    sort = "-createdAt",
-    status,
-    populateAll = "false",
-    populateTour = "true",
-    populateResponseUser = "true",
-    populateAttachments = "false",
-    tourFields,
-  } = req.query;
+  const { page = 1, limit = 10, sort = "-createdAt", status } = req.query;
 
   let query = Review.find({ user: req.user._id }).setOptions({
     _skipStatusFilter: true,
@@ -789,14 +782,13 @@ const getMyReviews = catchAsync(async (req, res) => {
     .limit(limitNum);
 
   populateReviewFields(query, {
-    populateAll,
-    populateUser: "false",
-    populateTour,
-    populateResponseUser,
-    populateAttachments,
-    populateFlagUsers: "false",
-    populateEditHistory: "false",
-    tourFields,
+    populateAll: false,
+    populateUser: false,
+    populateTour: flag(req.query.populateTour, true),
+    populateResponseUser: flag(req.query.populateResponseUser, true),
+    populateAttachments: false,
+    populateFlagUsers: false,
+    populateEditHistory: false,
   });
 
   const reviews = await query.lean();
