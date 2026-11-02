@@ -108,6 +108,18 @@ const formatDate = (iso?: string, withTime = false) => {
 const pct = (n?: number) => (typeof n === "number" ? `${n}%` : "—");
 const num = (n?: number) => (typeof n === "number" ? String(n) : "—");
 
+const getInitials = (name?: string, email?: string): string => {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (email?.trim().charAt(0) || "?").toUpperCase();
+};
+
 /* ------------------------------------------------------------------ */
 /* Small presentational pieces                                         */
 /* ------------------------------------------------------------------ */
@@ -213,10 +225,7 @@ export default function MePage() {
   const user = rawUser as unknown as ExtendedUser | null | undefined;
   const [copied, setCopied] = useState(false);
 
-  const initial = (user?.name || user?.email || "?")
-    .trim()
-    .charAt(0)
-    .toUpperCase();
+  const initials = getInitials(user?.name, user?.email);
 
   const photoUrl =
     user?.photo && user.photo !== "default.jpg"
@@ -298,7 +307,7 @@ export default function MePage() {
                   />
                 ) : (
                   <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-emerald-500 to-sky-500 text-3xl font-bold text-white shadow-md">
-                    {initial}
+                    {initials}
                   </span>
                 )}
                 <div className="min-w-0">
