@@ -20,6 +20,7 @@ import {
   updateMe,
   deleteMe,
   updateMyPassword,
+  updateMyPhoto,
 } from "../controllers/userController.js";
 import {
   checkValidId,
@@ -34,6 +35,7 @@ import {
   registerLimiter,
   userUpdateLimiter,
 } from "../middleware/rateLimitMiddleware.js";
+import { uploadUserPhoto } from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
@@ -49,6 +51,10 @@ router
   .get(getMe)
   .patch(userUpdateLimiter, updateMe)
   .delete(userUpdateLimiter, deleteMe);
+
+router
+  .route("/me/photo")
+  .patch(userUpdateLimiter, uploadUserPhoto, updateMyPhoto);
 
 router.route("/me/password").patch(userUpdateLimiter, updateMyPassword);
 
