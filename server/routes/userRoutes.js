@@ -37,11 +37,12 @@ import {
 
 const router = express.Router();
 
-router.route("/").get(getAllUsers);
-
-router.route("/create").post(registerLimiter, validateUser, createUser);
-
+/* Everything below requires a logged-in user */
 router.use(protect);
+
+/* ============================================================
+   CURRENT USER
+   ============================================================ */
 
 router
   .route("/me")
@@ -51,18 +52,23 @@ router
 
 router.route("/me/password").patch(userUpdateLimiter, updateMyPassword);
 
-router.route("/:userId/tours").get(checkValidId, getUserTours);
-router.route("/:userId/reviews").get(checkValidId, getUserReviews);
+/* ============================================================
+   ADMIN COLLECTION ROUTES (static paths first)
+   ============================================================ */
 
-router.route("/:userId/stats").get(checkValidId, getUserStats);
+router.route("/").get(authorize("admin"), getAllUsers);
+
+router
+  .route("/create")
+  .post(authorize("admin"), registerLimiter, validateUser, createUser);
 
 router.route("/search").get(authorize("admin"), searchUsers);
+
+router.route("/stats/all").get(authorize("admin"), getUsersWithStats);
 
 router.route("/bulk/delete").delete(authorize("admin"), bulkDeleteUsers);
 
 router.route("/bulk/update").patch(authorize("admin"), bulkUpdateUsers);
-
-router.route("/stats/all").get(authorize("admin"), getUsersWithStats);
 
 router
   .route("/by-role/:role")
@@ -74,12 +80,20 @@ router
   );
 
 /* ============================================================
-   SINGLE USER
+   PER-USER DATA (self or admin, enforced in the controller)
+   ============================================================ */
+
+router.route("/:id/tours").get(checkValidId, getUserTours);
+router.route("/:id/reviews").get(checkValidId, getUserReviews);
+router.route("/:id/stats").get(checkValidId, getUserStats);
+
+/* ============================================================
+   SINGLE USER (admin)
    ============================================================ */
 
 router
   .route("/:id")
-  .get(checkValidId, getUser)
+  .get(checkValidId, authorize("admin"), getUser)
   .patch(
     checkValidId,
     userUpdateLimiter,
