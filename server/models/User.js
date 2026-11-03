@@ -29,6 +29,31 @@ function getEmailErrorMessage(props) {
   return `${props.value} is not a valid email address!`;
 }
 
+function validateNotFuture(value) {
+  return !value || value <= new Date();
+}
+
+function validateNotTooOld(value) {
+  return !value || value >= new Date("1900-01-01");
+}
+
+/**
+ * Photo may be the default filename, an http(s) URL, or an
+ * image path/filename (e.g. "/uploads/me.jpg" or "user-123.jpeg").
+ */
+function validatePhoto(value) {
+  if (!value || value === "default.jpg") return true;
+
+  if (/^https?:\/\//i.test(value)) {
+    return validator.isURL(value, {
+      protocols: ["http", "https"],
+      require_protocol: true,
+    });
+  }
+
+  return /^[\w\-./]+\.(jpe?g|png|webp|gif|avif)$/i.test(value);
+}
+
 /* ============================================================
    SANITIZERS
    ============================================================ */
@@ -110,8 +135,17 @@ function sanitizeArray(arr) {
   });
 }
 
+function sanitizeStringList(list) {
+  return list.map(function sanitizeListItem(item) {
+    return sanitizeString(item);
+  });
+}
+
 /**
  * Sanitize user-controlled fields before validation runs.
+ * Works on both mongoose documents (pre-validate) and plain
+ * update objects (pre-findOneAndUpdate).
+ *
  * Note: `email` is sanitized but not stripped of its `@`, `.` etc.
  * because `sanitizeString` only removes dangerous chars, not all
  * non-alphanumerics. The `validator.isEmail` check afterwards still
@@ -126,6 +160,10 @@ function sanitizeDocument(doc) {
     doc.email = sanitizeString(doc.email);
   }
 
+  if (doc.photo) {
+    doc.photo = sanitizeString(doc.photo);
+  }
+
   if (doc.bio) {
     doc.bio = sanitizeString(doc.bio);
   }
@@ -135,21 +173,27 @@ function sanitizeDocument(doc) {
   }
 
   if (doc.languages && Array.isArray(doc.languages)) {
-    doc.languages = doc.languages.map(function sanitizeLanguage(lang) {
-      return sanitizeString(lang);
-    });
+    doc.languages = sanitizeStringList(doc.languages);
+  }
+
+  if (doc.expertise && Array.isArray(doc.expertise)) {
+    doc.expertise = sanitizeStringList(doc.expertise);
   }
 
   if (doc.certifications && Array.isArray(doc.certifications)) {
-    doc.certifications = doc.certifications.map(function sanitizeCert(cert) {
-      return sanitizeString(cert);
-    });
+    doc.certifications = sanitizeStringList(doc.certifications);
   }
 
   if (doc.guideSpecialties && Array.isArray(doc.guideSpecialties)) {
-    doc.guideSpecialties = doc.guideSpecialties.map(
-      function sanitizeSpecialty(specialty) {
-        return sanitizeString(specialty);
+    doc.guideSpecialties = sanitizeStringList(doc.guideSpecialties);
+  }
+
+  if (doc.address) {
+    ["street", "city", "state", "country", "postalCode"].forEach(
+      function sanitizeAddressField(field) {
+        if (doc.address[field]) {
+          doc.address[field] = sanitizeString(doc.address[field]);
+        }
       },
     );
   }
@@ -201,6 +245,12 @@ const userSchema = new mongoose.Schema(
     photo: {
       type: String,
       default: "default.jpg",
+      trim: true,
+      maxlength: [500, "Photo link is too long"],
+      validate: {
+        validator: validatePhoto,
+        message: "Photo must be an http(s) link or an image file path",
+      },
     },
     password: {
       type: String,
@@ -300,8 +350,13 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    expertise: {
+      type: [String],
+      default: [],
+    },
     bio: {
       type: String,
+      trim: true,
       maxlength: [500, "Bio cannot be more than 500 characters"],
     },
     experienceYears: {
@@ -312,6 +367,33 @@ const userSchema = new mongoose.Schema(
     certifications: [String],
     phoneNumber: {
       type: String,
+      trim: true,
+      maxlength: [20, "Phone number is too long"],
+    },
+    dateOfBirth: {
+      type: Date,
+      validate: [
+        {
+          validator: validateNotFuture,
+          message: "Date of birth cannot be in the future",
+        },
+        {
+          validator: validateNotTooOld,
+          message: "Please enter a valid date of birth",
+        },
+      ],
+    },
+    address: {
+      street: { type: String, trim: true, maxlength: 120 },
+      city: { type: String, trim: true, maxlength: 80 },
+      state: { type: String, trim: true, maxlength: 80 },
+      country: { type: String, trim: true, maxlength: 80 },
+      postalCode: { type: String, trim: true, maxlength: 20 },
+    },
+    preferences: {
+      newsletter: { type: Boolean, default: false },
+      emailNotifications: { type: Boolean, default: true },
+      smsNotifications: { type: Boolean, default: false },
     },
     emergencyContact: {
       name: String,
@@ -379,6 +461,19 @@ userSchema
 
 userSchema.pre("validate", function sanitizeBeforeValidate() {
   sanitizeDocument(this);
+});
+
+/**
+ * findByIdAndUpdate / findOneAndUpdate skip document middleware,
+ * so the pre-validate sanitizer above never runs for them
+ * (this is what `updateMe` uses). Sanitize the update payload here.
+ */
+userSchema.pre("findOneAndUpdate", function sanitizeBeforeUpdate() {
+  const update = this.getUpdate();
+
+  if (!update) return;
+
+  sanitizeDocument(update.$set || update);
 });
 
 userSchema.pre("validate", function validatePasswordConfirm() {
