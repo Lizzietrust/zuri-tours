@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { isValidPhoneNumber } from "react-phone-number-input";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/services/auth";
 import { getInitials, getPhotoUrl } from "@/lib/user";
+import { PhoneField } from "@/components/forms/PhoneField";
 
 type Status = {
   type: "idle" | "saving" | "ok" | "error";
@@ -208,10 +210,6 @@ function Avatar({
   );
 }
 
-/**
- * Avatar + camera button. Clicking the camera opens the file picker.
- * The parent handles upload; this component just raises the File.
- */
 function PhotoUpload({
   photo,
   initials,
@@ -242,7 +240,6 @@ function PhotoUpload({
           className="h-16 w-16 shrink-0 rounded-full text-xl shadow-sm"
         />
 
-        {/* Uploading overlay */}
         {uploading && (
           <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40">
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -335,11 +332,9 @@ export default function SettingsPage() {
   const profileForm: ProfileForm = { ...baseProfile, ...profileDraft };
   const [profileStatus, setProfileStatus] = useState<Status>({ type: "idle" });
 
-  /* ---------- Photo upload state ---------- */
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
-  /* ---------- Password form ---------- */
   const [pwForm, setPwForm] = useState({
     currentPassword: "",
     password: "",
@@ -348,7 +343,6 @@ export default function SettingsPage() {
   const [pwStatus, setPwStatus] = useState<Status>({ type: "idle" });
   const [showPw, setShowPw] = useState(false);
 
-  /* ---------- Delete account ---------- */
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -386,7 +380,6 @@ export default function SettingsPage() {
     }
   };
 
-  /* ---------- Photo upload handler ---------- */
   const handlePhotoFile = async (file: File) => {
     setPhotoError(null);
 
@@ -420,7 +413,6 @@ export default function SettingsPage() {
     }
   };
 
-  /* ---------- Photo remove handler ---------- */
   const handlePhotoRemove = async () => {
     setPhotoError(null);
     setUploadingPhoto(true);
@@ -438,7 +430,6 @@ export default function SettingsPage() {
     }
   };
 
-  /* ---------- Save profile ---------- */
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
 
@@ -452,13 +443,15 @@ export default function SettingsPage() {
       });
       return;
     }
-    if (phoneNumber && !/^\+?\d{7,15}$/.test(phoneNumber)) {
+
+    if (phoneNumber && !isValidPhoneNumber(phoneNumber)) {
       setProfileStatus({
         type: "error",
-        message: "Enter a valid phone number (7–15 digits)",
+        message: "Enter a valid phone number for the selected country.",
       });
       return;
     }
+
     if (profileForm.dateOfBirth && profileForm.dateOfBirth > today) {
       setProfileStatus({
         type: "error",
@@ -627,7 +620,6 @@ export default function SettingsPage() {
             noValidate
             className="space-y-5 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:border-emerald-200 hover:shadow-md"
           >
-            {/* Photo + name as the section header */}
             <div className="flex items-center gap-4">
               <PhotoUpload
                 photo={profileForm.photo}
@@ -674,15 +666,16 @@ export default function SettingsPage() {
                 disabled
                 hint="Email can't be changed here."
               />
-              <TextField
+
+              <PhoneField
                 id="phoneNumber"
                 label="Phone"
-                type="tel"
-                autoComplete="tel"
                 value={profileForm.phoneNumber}
                 onChange={(v) => updateProfileField("phoneNumber", v)}
-                placeholder="+234 800 000 0000"
+                defaultCountry="NG"
+                hint="Pick your country, then enter your number."
               />
+
               <TextField
                 id="dateOfBirth"
                 label="Date of birth"
