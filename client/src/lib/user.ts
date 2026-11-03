@@ -1,4 +1,9 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_ORIGIN = (
+  process.env.NEXT_PUBLIC_API_ORIGIN ??
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v\d+\/?$/, "") ??
+  ""
+).replace(/\/$/, "");
+
 const PHOTO_PATH = "/img/users";
 
 export const getInitials = (name?: string, email?: string): string => {
@@ -16,6 +21,7 @@ export const getInitials = (name?: string, email?: string): string => {
 export const getPhotoUrl = (photo?: string | null): string | null => {
   if (!photo || photo === "default.jpg") return null;
   if (/^https?:\/\//i.test(photo)) return photo;
-  if (photo.startsWith("/")) return `${API_URL}${photo}`;
-  return `${API_URL}${PHOTO_PATH}/${photo}`;
+  if (photo.startsWith("data:")) return photo;
+  if (photo.startsWith("/")) return `${API_ORIGIN}${photo}`;
+  return `${API_ORIGIN}${PHOTO_PATH}/${photo}`;
 };
