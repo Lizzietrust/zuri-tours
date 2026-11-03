@@ -1,3 +1,6 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import User from "../models/User.js";
 import Tour from "../models/Tour.js";
 import Review from "../models/Review.js";
@@ -19,6 +22,20 @@ import {
   getAll,
   getOne,
 } from "../utils/handlerFactory.js";
+
+/* ============================================================
+   ESM PATH HELPERS + UPLOAD DIRECTORY
+   ============================================================ */
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Directory where user photos are stored on disk.
+ * Must match the `destination` used in `middleware/uploadMiddleware.js`
+ * and be served statically from `/img` in `server.js`.
+ */
+const USERS_IMG_DIR = path.join(__dirname, "..", "public", "img", "users");
 
 /* ============================================================
    SHARED SELECTS / CONSTANTS / HELPERS
@@ -223,6 +240,48 @@ const createUser = createOne(User, {
   },
 
   populateOptions: null,
+});
+
+const updateMyPhoto = catchAsync(async (req, res, next) => {
+  if (!req.file) {
+    return next(new AppError("Please upload an image file", 400));
+  }
+
+  console.log(`🖼️  Saved photo: ${req.file.filename} at ${req.file.path}`);
+
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    fs.unlink(req.file.path, () => {});
+
+    return next(new AppError("User not found", 404));
+  }
+
+  const oldPhoto = user.photo;
+
+  user.photo = req.file.filename;
+  await user.save({ validateBeforeSave: false });
+
+  if (
+    oldPhoto &&
+    oldPhoto !== "default.jpg" &&
+    !/^https?:\/\//i.test(oldPhoto) &&
+    oldPhoto !== req.file.filename
+  ) {
+    const oldPath = path.join(USERS_IMG_DIR, path.basename(oldPhoto));
+
+    fs.unlink(oldPath, () => {});
+  }
+
+  return sendSuccessResponse(res, 200, "Profile photo updated successfully", {
+    user: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      photo: user.photo,
+    },
+  });
 });
 
 const updateUser = updateOne(User, {
@@ -996,4 +1055,5 @@ export {
   updateMe,
   deleteMe,
   updateMyPassword,
+  updateMyPhoto,
 };
