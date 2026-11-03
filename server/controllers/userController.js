@@ -21,8 +21,10 @@ import {
 } from "../utils/handlerFactory.js";
 
 /* ============================================================
-   SHARED SELECTS / CONSTANTS
+   SHARED SELECTS / CONSTANTS / HELPERS
    ============================================================ */
+
+const VALID_ROLES = ["user", "guide", "lead-guide", "admin"];
 
 const SENSITIVE_FIELDS = [
   "password",
@@ -43,6 +45,49 @@ const SENSITIVE_FIELDS = [
 
 const SAFE_USER_SELECT =
   "-password -passwordChangedAt -resetPasswordToken -resetPasswordExpire -loginAttempts -lockUntil -tokenVersion -accountDeleted -accountDeletedAt";
+
+const TOUR_SORTS = [
+  "createdAt",
+  "-createdAt",
+  "price",
+  "-price",
+  "ratingsAverage",
+  "-ratingsAverage",
+  "name",
+  "-name",
+];
+
+const REVIEW_SORTS = ["createdAt", "-createdAt", "rating", "-rating"];
+
+const parsePagination = (query, { defaultLimit = 10, maxLimit = 100 } = {}) => {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(
+    Math.max(parseInt(query.limit, 10) || defaultLimit, 1),
+    maxLimit,
+  );
+
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const pickSort = (value, allowed, fallback = "-createdAt") =>
+  allowed.includes(value) ? value : fallback;
+
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const assertSelfOrAdmin = (req, targetId, what) => {
+  const isSelf = req.user._id.toString() === targetId;
+  const isAdmin = req.user.role === "admin";
+
+  if (!isSelf && !isAdmin) {
+    throw new AppError(
+      `You don't have permission to view this user's ${what}`,
+      403,
+    );
+  }
+
+  return { isSelf, isAdmin };
+};
 
 /* ============================================================
    DELETE FACTORY HANDLERS
@@ -128,7 +173,7 @@ const bulkDeleteUsers = deleteMany(User, {
 });
 
 /* ============================================================
-   CREATE FACTORY HANDLER
+   CREATE / UPDATE FACTORY HANDLERS
    ============================================================ */
 
 const createUser = createOne(User, {
@@ -136,12 +181,24 @@ const createUser = createOne(User, {
   blockedFields: [
     "accountDeleted",
     "accountDeletedAt",
+    "isDeleted",
+    "deletedAt",
+    "deletedBy",
     "tokenVersion",
     "loginAttempts",
     "lockUntil",
+    "lastLogin",
+    "active",
+    "activeSessions",
     "passwordChangedAt",
     "resetPasswordToken",
     "resetPasswordExpire",
+    "assignedTours",
+    "rating",
+    "totalReviews",
+    "salary",
+    "hireDate",
+    "performanceMetrics",
   ],
 
   transformData: (data) => {
@@ -172,7 +229,8 @@ const updateUser = updateOne(User, {
   modelName: "User",
   idParam: "id",
   conditions: { accountDeleted: false },
-  blockedFields: SENSITIVE_FIELDS,
+
+  blockedFields: [...SENSITIVE_FIELDS, "role"],
   select: SAFE_USER_SELECT,
 
   beforeUpdate: (data) => {
@@ -190,6 +248,7 @@ const updateUser = updateOne(User, {
 const updateUserRole = updateOne(User, {
   modelName: "User",
   idParam: "id",
+  conditions: { accountDeleted: false },
   allowedFields: ["role"],
   select: SAFE_USER_SELECT,
 
@@ -198,11 +257,9 @@ const updateUserRole = updateOne(User, {
       throw new AppError("Please provide a role", 400);
     }
 
-    const validRoles = ["user", "guide", "lead-guide", "admin"];
-
-    if (!validRoles.includes(data.role)) {
+    if (!VALID_ROLES.includes(data.role)) {
       throw new AppError(
-        `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`,
         400,
       );
     }
@@ -225,6 +282,10 @@ const bulkUpdateUsers = updateMany(User, {
   },
 });
 
+/* ============================================================
+   READ FACTORY HANDLERS
+   ============================================================ */
+
 const getAllUsers = getAll(User, {
   modelName: "User",
   conditions: { accountDeleted: false },
@@ -246,7 +307,7 @@ const getUser = getOne(User, {
     {
       path: "assignedTours",
       select: "name slug price duration difficulty ratingsAverage imageCover",
-      populate: { path: "guides", select: "name email profileImage" },
+      populate: { path: "guides", select: "name email photo" },
     },
   ],
 });
@@ -261,12 +322,11 @@ const getUsersByRole = getAll(User, {
   resourceKey: "users",
 
   transformFilter: (filter, req) => {
-    const validRoles = ["user", "guide", "lead-guide", "admin"];
     const role = req.params.role || filter.role;
 
-    if (!validRoles.includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       throw new AppError(
-        `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`,
         400,
       );
     }
@@ -275,22 +335,17 @@ const getUsersByRole = getAll(User, {
   },
 });
 
+/* ============================================================
+   PER-USER ENDPOINTS  (routes use :id)
+   ============================================================ */
+
 const getUserTours = catchAsync(async (req, res) => {
-  const { userId } = req.params;
-  const { page = 1, limit = 10, sort = "-createdAt" } = req.query;
+  const { id } = req.params;
 
-  const isSelf = req.user._id.toString() === userId;
-  const isAdmin = req.user.role === "admin";
-
-  if (!isSelf && !isAdmin) {
-    return sendValidationErrorResponse(
-      res,
-      "You don't have permission to view this user's tours",
-    );
-  }
+  assertSelfOrAdmin(req, id, "tours");
 
   const user = await User.findOne({
-    _id: userId,
+    _id: id,
     accountDeleted: false,
   }).select("name email role assignedTours");
 
@@ -298,39 +353,37 @@ const getUserTours = catchAsync(async (req, res) => {
     return sendNotFoundResponse(res, "User not found");
   }
 
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
+  const { page, limit, skip } = parsePagination(req.query);
+  const sort = pickSort(req.query.sort, TOUR_SORTS);
 
-  const assignedToursQuery = Tour.find({
+  const tourFilter = {
     _id: { $in: user.assignedTours || [] },
     isActive: true,
-  })
-    .select(
-      "name slug price duration difficulty ratingsAverage imageCover summary startDates",
-    )
-    .populate({
-      path: "guides",
-      select: "name email profileImage",
-    })
-    .populate({
-      path: "reviews",
-      options: { limit: 3, sort: "-createdAt" },
-      populate: {
-        path: "user",
-        select: "name email profileImage",
-      },
-    })
-    .sort(sort)
-    .skip(skip)
-    .limit(limitNum);
+  };
 
-  const assignedTours = await assignedToursQuery.lean();
-
-  const totalAssigned = await Tour.countDocuments({
-    _id: { $in: user.assignedTours || [] },
-    isActive: true,
-  });
+  const [assignedTours, totalAssigned] = await Promise.all([
+    Tour.find(tourFilter)
+      .select(
+        "name slug price duration difficulty ratingsAverage imageCover summary startDates",
+      )
+      .populate({
+        path: "guides",
+        select: "name email photo",
+      })
+      .populate({
+        path: "reviews",
+        options: { perDocumentLimit: 3, sort: "-createdAt" },
+        populate: {
+          path: "user",
+          select: "name email photo",
+        },
+      })
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Tour.countDocuments(tourFilter),
+  ]);
 
   sendSuccessResponse(res, 200, "User tours fetched successfully", {
     user: {
@@ -342,36 +395,21 @@ const getUserTours = catchAsync(async (req, res) => {
     assignedTours: {
       data: assignedTours,
       total: totalAssigned,
-      page: pageNum,
-      pages: Math.ceil(totalAssigned / limitNum),
-      limit: limitNum,
+      page,
+      pages: Math.ceil(totalAssigned / limit),
+      limit,
     },
   });
 });
 
 const getUserReviews = catchAsync(async (req, res) => {
-  const { userId } = req.params;
-  const {
-    page = 1,
-    limit = 10,
-    sort = "-createdAt",
-    status = "approved",
-    minRating,
-    maxRating,
-  } = req.query;
+  const { id } = req.params;
+  const { status = "approved", minRating, maxRating } = req.query;
 
-  const isSelf = req.user._id.toString() === userId;
-  const isAdmin = req.user.role === "admin";
-
-  if (!isSelf && !isAdmin) {
-    return sendValidationErrorResponse(
-      res,
-      "You don't have permission to view this user's reviews",
-    );
-  }
+  const { isAdmin } = assertSelfOrAdmin(req, id, "reviews");
 
   const user = await User.findOne({
-    _id: userId,
+    _id: id,
     accountDeleted: false,
   });
 
@@ -379,114 +417,109 @@ const getUserReviews = catchAsync(async (req, res) => {
     return sendNotFoundResponse(res, "User not found");
   }
 
-  let query = Review.find({ user: userId });
+  const { page, limit, skip } = parsePagination(req.query);
+  const sort = pickSort(req.query.sort, REVIEW_SORTS);
+
+  const filter = { user: user._id };
 
   if (!isAdmin) {
-    query = query.where("status").equals("approved");
+    filter.status = "approved";
   } else if (status) {
-    query = query.where("status").equals(status);
+    filter.status = String(status);
   }
 
-  if (minRating) {
-    query = query.where("rating").gte(parseFloat(minRating));
+  const min = parseFloat(minRating);
+  const max = parseFloat(maxRating);
+
+  if (!Number.isNaN(min) || !Number.isNaN(max)) {
+    filter.rating = {};
+    if (!Number.isNaN(min)) filter.rating.$gte = min;
+    if (!Number.isNaN(max)) filter.rating.$lte = max;
   }
-  if (maxRating) {
-    query = query.where("rating").lte(parseFloat(maxRating));
-  }
 
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
+  const [reviews, total, stats, distribution] = await Promise.all([
+    Review.find(filter)
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .populate({
+        path: "tour",
+        select: "name slug price duration difficulty imageCover ratingsAverage",
+      })
+      .populate({
+        path: "user",
+        select: "name email photo",
+      })
+      .populate({
+        path: "response.respondedBy",
+        select: "name email role",
+      })
+      .lean(),
 
-  query = query
-    .sort(sort)
-    .skip(skip)
-    .limit(limitNum)
-    .populate({
-      path: "tour",
-      select: "name slug price duration difficulty imageCover ratingsAverage",
-    })
-    .populate({
-      path: "user",
-      select: "name email profileImage",
-    })
-    .populate({
-      path: "response.respondedBy",
-      select: "name email role",
-    });
+    Review.countDocuments(filter),
 
-  const reviews = await query.lean();
-
-  const countQuery = Review.find({
-    user: userId,
-    ...(!isAdmin ? { status: "approved" } : {}),
-    ...(minRating ? { rating: { $gte: parseFloat(minRating) } } : {}),
-    ...(maxRating ? { rating: { $lte: parseFloat(maxRating) } } : {}),
-  });
-
-  const total = await countQuery.countDocuments();
-
-  const stats = await Review.aggregate([
-    {
-      $match: {
-        user: user._id,
-        status: "approved",
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalReviews: { $sum: 1 },
-        averageRating: { $avg: "$rating" },
-        minRating: { $min: "$rating" },
-        maxRating: { $max: "$rating" },
-        totalHelpful: { $sum: "$helpfulCount" },
-        verifiedCount: { $sum: { $cond: ["$isVerifiedPurchase", 1, 0] } },
-        recommendedCount: { $sum: { $cond: ["$isRecommended", 1, 0] } },
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        totalReviews: 1,
-        averageRating: { $round: ["$averageRating", 1] },
-        minRating: 1,
-        maxRating: 1,
-        totalHelpful: 1,
-        verifiedCount: 1,
-        recommendedCount: 1,
-        recommendationRate: {
-          $cond: [
-            { $eq: ["$totalReviews", 0] },
-            0,
-            {
-              $multiply: [
-                { $divide: ["$recommendedCount", "$totalReviews"] },
-                100,
-              ],
-            },
-          ],
+    Review.aggregate([
+      {
+        $match: {
+          user: user._id,
+          status: "approved",
         },
       },
-    },
-  ]);
+      {
+        $group: {
+          _id: null,
+          totalReviews: { $sum: 1 },
+          averageRating: { $avg: "$rating" },
+          minRating: { $min: "$rating" },
+          maxRating: { $max: "$rating" },
+          totalHelpful: { $sum: "$helpfulCount" },
+          verifiedCount: { $sum: { $cond: ["$isVerifiedPurchase", 1, 0] } },
+          recommendedCount: { $sum: { $cond: ["$isRecommended", 1, 0] } },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalReviews: 1,
+          averageRating: { $round: ["$averageRating", 1] },
+          minRating: 1,
+          maxRating: 1,
+          totalHelpful: 1,
+          verifiedCount: 1,
+          recommendedCount: 1,
+          recommendationRate: {
+            $cond: [
+              { $eq: ["$totalReviews", 0] },
+              0,
+              {
+                $multiply: [
+                  { $divide: ["$recommendedCount", "$totalReviews"] },
+                  100,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ]),
 
-  const distribution = await Review.aggregate([
-    {
-      $match: {
-        user: user._id,
-        status: "approved",
+    Review.aggregate([
+      {
+        $match: {
+          user: user._id,
+          status: "approved",
+        },
       },
-    },
-    {
-      $group: {
-        _id: "$rating",
-        count: { $sum: 1 },
+      {
+        $group: {
+          _id: "$rating",
+          count: { $sum: 1 },
+        },
       },
-    },
-    {
-      $sort: { _id: -1 },
-    },
+      {
+        $sort: { _id: -1 },
+      },
+    ]),
   ]);
 
   sendSuccessResponse(res, 200, "User reviews fetched successfully", {
@@ -494,14 +527,14 @@ const getUserReviews = catchAsync(async (req, res) => {
       id: user._id,
       name: user.name,
       email: user.email,
-      profileImage: user.profileImage,
+      photo: user.photo,
     },
     reviews: {
       data: reviews,
       total,
-      page: pageNum,
-      pages: Math.ceil(total / limitNum),
-      limit: limitNum,
+      page,
+      pages: Math.ceil(total / limit),
+      limit,
     },
     stats: stats[0] || {
       totalReviews: 0,
@@ -520,15 +553,7 @@ const getUserReviews = catchAsync(async (req, res) => {
 const getUserStats = catchAsync(async (req, res) => {
   const { id } = req.params;
 
-  const isSelf = req.user._id.toString() === id;
-  const isAdmin = req.user.role === "admin";
-
-  if (!isSelf && !isAdmin) {
-    return sendValidationErrorResponse(
-      res,
-      "You don't have permission to view this user's stats",
-    );
-  }
+  assertSelfOrAdmin(req, id, "stats");
 
   const user = await User.findOne({
     _id: id,
@@ -539,79 +564,66 @@ const getUserStats = catchAsync(async (req, res) => {
     return sendNotFoundResponse(res, "User not found");
   }
 
-  const tourStats = await Tour.aggregate([
-    {
-      $match: {
-        _id: { $in: user.assignedTours || [] },
-        isActive: true,
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalTours: { $sum: 1 },
-        averagePrice: { $avg: "$price" },
-        minPrice: { $min: "$price" },
-        maxPrice: { $max: "$price" },
-        averageDuration: { $avg: "$duration" },
-        totalRatings: { $sum: "$ratingsQuantity" },
-        averageRating: { $avg: "$ratingsAverage" },
-      },
-    },
-  ]);
+  const assignedToursMatch = {
+    _id: { $in: user.assignedTours || [] },
+    isActive: true,
+  };
 
-  const reviewStats = await Review.aggregate([
-    {
-      $match: {
-        user: user._id,
-        status: "approved",
+  const [
+    tourStats,
+    reviewStats,
+    difficultyDistribution,
+    categoryDistribution,
+    recentReviews,
+    recentTours,
+  ] = await Promise.all([
+    Tour.aggregate([
+      { $match: assignedToursMatch },
+      {
+        $group: {
+          _id: null,
+          totalTours: { $sum: 1 },
+          averagePrice: { $avg: "$price" },
+          minPrice: { $min: "$price" },
+          maxPrice: { $max: "$price" },
+          averageDuration: { $avg: "$duration" },
+          totalRatings: { $sum: "$ratingsQuantity" },
+          averageRating: { $avg: "$ratingsAverage" },
+        },
       },
-    },
-    {
-      $group: {
-        _id: null,
-        totalReviews: { $sum: 1 },
-        averageRating: { $avg: "$rating" },
-        minRating: { $min: "$rating" },
-        maxRating: { $max: "$rating" },
-        totalHelpful: { $sum: "$helpfulCount" },
-        verifiedCount: { $sum: { $cond: ["$isVerifiedPurchase", 1, 0] } },
-      },
-    },
-  ]);
+    ]),
 
-  const difficultyDistribution = await Tour.aggregate([
-    {
-      $match: {
-        _id: { $in: user.assignedTours || [] },
-        isActive: true,
+    Review.aggregate([
+      {
+        $match: {
+          user: user._id,
+          status: "approved",
+        },
       },
-    },
-    {
-      $group: {
-        _id: "$difficulty",
-        count: { $sum: 1 },
+      {
+        $group: {
+          _id: null,
+          totalReviews: { $sum: 1 },
+          averageRating: { $avg: "$rating" },
+          minRating: { $min: "$rating" },
+          maxRating: { $max: "$rating" },
+          totalHelpful: { $sum: "$helpfulCount" },
+          verifiedCount: { $sum: { $cond: ["$isVerifiedPurchase", 1, 0] } },
+        },
       },
-    },
-  ]);
+    ]),
 
-  const categoryDistribution = await Tour.aggregate([
-    {
-      $match: {
-        _id: { $in: user.assignedTours || [] },
-        isActive: true,
-      },
-    },
-    {
-      $group: {
-        _id: "$category",
-        count: { $sum: 1 },
-      },
-    },
-  ]);
+    Tour.aggregate([
+      { $match: assignedToursMatch },
+      { $group: { _id: "$difficulty", count: { $sum: 1 } } },
+    ]),
 
-  const recentActivity = {
-    recentReviews: await Review.find({
+    Tour.aggregate([
+      { $match: assignedToursMatch },
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+    ]),
+
+    Review.find({
       user: user._id,
       status: "approved",
     })
@@ -624,15 +636,12 @@ const getUserStats = catchAsync(async (req, res) => {
       .select("review rating createdAt tour")
       .lean(),
 
-    assignedTours: await Tour.find({
-      _id: { $in: user.assignedTours || [] },
-      isActive: true,
-    })
+    Tour.find(assignedToursMatch)
       .sort("-createdAt")
       .limit(5)
       .select("name slug price duration difficulty imageCover")
       .lean(),
-  };
+  ]);
 
   sendSuccessResponse(res, 200, "User statistics fetched successfully", {
     user: {
@@ -663,14 +672,21 @@ const getUserStats = catchAsync(async (req, res) => {
       difficulty: difficultyDistribution,
       category: categoryDistribution,
     },
-    recentActivity,
+    recentActivity: {
+      recentReviews,
+      assignedTours: recentTours,
+    },
   });
 });
+
+/* ============================================================
+   ADMIN LISTS / SEARCH
+   ============================================================ */
 
 const getUsersWithStats = catchAsync(async (req, res) => {
   const users = await User.aggregate([
     {
-      $match: { accountDeleted: false },
+      $match: { accountDeleted: false, active: { $ne: false } },
     },
     {
       $lookup: {
@@ -724,6 +740,7 @@ const getUsersWithStats = catchAsync(async (req, res) => {
         loginAttempts: 0,
         lockUntil: 0,
         tokenVersion: 0,
+        activeSessions: 0,
         accountDeleted: 0,
         accountDeletedAt: 0,
       },
@@ -745,50 +762,51 @@ const getUsersWithStats = catchAsync(async (req, res) => {
 });
 
 const searchUsers = catchAsync(async (req, res) => {
-  const { q, role, limit = 20, page = 1 } = req.query;
+  const { q, role } = req.query;
 
-  if (!q) {
+  if (!q || typeof q !== "string" || !q.trim()) {
     return sendValidationErrorResponse(res, "Please provide a search query");
   }
 
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  const skip = (pageNum - 1) * limitNum;
+  const { page, limit, skip } = parsePagination(req.query, {
+    defaultLimit: 20,
+  });
+
+  const pattern = escapeRegex(q.trim());
 
   const searchQuery = {
     accountDeleted: false,
     $or: [
-      { name: { $regex: q, $options: "i" } },
-      { email: { $regex: q, $options: "i" } },
+      { name: { $regex: pattern, $options: "i" } },
+      { email: { $regex: pattern, $options: "i" } },
     ],
   };
 
   if (role) {
-    const validRoles = ["user", "guide", "lead-guide", "admin"];
-
-    if (!validRoles.includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       return sendValidationErrorResponse(
         res,
-        `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+        `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`,
       );
     }
 
     searchQuery.role = role;
   }
 
-  const users = await User.find(searchQuery)
-    .select(SAFE_USER_SELECT)
-    .skip(skip)
-    .limit(limitNum)
-    .sort({ name: 1 });
-
-  const total = await User.countDocuments(searchQuery);
+  const [users, total] = await Promise.all([
+    User.find(searchQuery)
+      .select(SAFE_USER_SELECT)
+      .skip(skip)
+      .limit(limit)
+      .sort({ name: 1 }),
+    User.countDocuments(searchQuery),
+  ]);
 
   sendSuccessResponse(res, 200, "Users search completed", users, {
     total,
-    page: pageNum,
-    pages: Math.ceil(total / limitNum),
-    limit: limitNum,
+    page,
+    pages: Math.ceil(total / limit),
+    limit,
   });
 });
 
@@ -796,22 +814,12 @@ const searchUsers = catchAsync(async (req, res) => {
    /me ENDPOINTS (current authenticated user)
    ============================================================ */
 
-/**
- * ✅ FIXED: Added "phoneNumber" and kept both "phone" and "phoneNumber"
- * so the frontend can send either key. Your User schema uses `phoneNumber`,
- * but your settings page sends `phone`. Including both means updates work
- * regardless of which key is sent — and if the schema later adopts `phone`,
- * nothing breaks.
- *
- * Also added: "address", "dateOfBirth", "preferences", "languages",
- * "expertise" (already present) so admin/self-service edits are flexible.
- */
+/* Canonical keys match the User schema. Aliases keep older clients working:
+   `profileImage` -> `photo`, `phone` -> `phoneNumber`. */
 const ALLOWED_ME_UPDATE_FIELDS = [
   "name",
   "photo",
-  "profileImage",
   "bio",
-  "phone",
   "phoneNumber",
   "dateOfBirth",
   "address",
@@ -819,6 +827,11 @@ const ALLOWED_ME_UPDATE_FIELDS = [
   "languages",
   "expertise",
 ];
+
+const ME_FIELD_ALIASES = {
+  profileImage: "photo",
+  phone: "phoneNumber",
+};
 
 const getMe = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id)
@@ -842,7 +855,7 @@ const updateMe = catchAsync(async (req, res, next) => {
   if (req.body.password || req.body.passwordConfirm) {
     return next(
       new AppError(
-        "This route is not for password updates. Please use /updateMyPassword.",
+        "This route is not for password updates. Please use /me/password.",
         400,
       ),
     );
@@ -854,10 +867,14 @@ const updateMe = catchAsync(async (req, res, next) => {
 
   const filteredBody = {};
 
-  Object.keys(req.body).forEach((key) => {
-    if (ALLOWED_ME_UPDATE_FIELDS.includes(key)) {
-      filteredBody[key] = req.body[key];
-    }
+  Object.entries(req.body).forEach(([rawKey, value]) => {
+    const key = ME_FIELD_ALIASES[rawKey] || rawKey;
+
+    if (!ALLOWED_ME_UPDATE_FIELDS.includes(key)) return;
+
+    if (rawKey !== key && req.body[key] !== undefined) return;
+
+    filteredBody[key] = value;
   });
 
   if (Object.keys(filteredBody).length === 0) {
@@ -947,10 +964,6 @@ const updateMyPassword = catchAsync(async (req, res, next) => {
 
   user.password = password;
   user.passwordConfirm = passwordConfirm;
-
-  if (typeof user.tokenVersion === "number") {
-    user.tokenVersion += 1;
-  }
 
   await user.save();
 
