@@ -36,6 +36,7 @@ type ProfileForm = {
 const MIN_PASSWORD_LENGTH = 8;
 const BIO_MAX = 500;
 const DEFAULT_PHOTO = "default.jpg";
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:bg-gray-50 disabled:text-gray-500";
@@ -207,38 +208,29 @@ function Avatar({
   );
 }
 
+/**
+ * Avatar + camera button. Clicking the camera opens the file picker.
+ * The parent handles upload; this component just raises the File.
+ */
 function PhotoUpload({
   photo,
   initials,
-  onChange,
+  uploading,
+  onPickFile,
+  onRemove,
 }: {
   photo: string;
   initials: string;
-  onChange: (value: string) => void;
+  uploading: boolean;
+  onPickFile: (file: File) => void;
+  onRemove: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      alert("Please select an image file.");
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Image is too large. Please pick a file under 2MB.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        onChange(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    if (file) onPickFile(file);
+    e.target.value = "";
   };
 
   return (
@@ -249,14 +241,22 @@ function PhotoUpload({
           initial={initials}
           className="h-16 w-16 shrink-0 rounded-full text-xl shadow-sm"
         />
+
+        {/* Uploading overlay */}
+        {uploading && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          </div>
+        )}
+
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
           aria-label="Upload profile photo"
           title="Upload profile photo"
-          className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-white shadow-md transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+          className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-white shadow-md transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:opacity-60"
         >
-          {/* Camera / upload icon */}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
@@ -272,23 +272,27 @@ function PhotoUpload({
             <circle cx="12" cy="13" r="3" />
           </svg>
         </button>
+
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          onChange={handleFile}
+          onChange={handleChange}
           className="hidden"
         />
       </div>
+
       <div className="min-w-0">
         <p className="text-sm font-medium text-gray-800">Profile photo</p>
         <p className="text-xs text-gray-500">
-          Click the camera icon to upload a new photo.
+          {uploading
+            ? "Uploading…"
+            : "Click the camera icon to upload a new photo."}
         </p>
-        {photo && (
+        {photo && !uploading && (
           <button
             type="button"
-            onClick={() => onChange("")}
+            onClick={onRemove}
             className="mt-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
           >
             Remove photo
@@ -305,12 +309,6 @@ export default function SettingsPage() {
   const { user, refetch } = useAuth();
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ---------- Profile form ----------
-     We never copy `user` into state. Instead:
-       - baseProfile  = values derived from the current user
-       - profileDraft = only the fields the person has edited
-       - profileForm  = baseProfile overlaid with profileDraft (derived)
-  */
   const baseProfile = useMemo<ProfileForm>(
     () => ({
       name: user?.name ?? "",
@@ -332,9 +330,14 @@ export default function SettingsPage() {
     }),
     [user],
   );
+
   const [profileDraft, setProfileDraft] = useState<Partial<ProfileForm>>({});
   const profileForm: ProfileForm = { ...baseProfile, ...profileDraft };
   const [profileStatus, setProfileStatus] = useState<Status>({ type: "idle" });
+
+  /* ---------- Photo upload state ---------- */
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   /* ---------- Password form ---------- */
   const [pwForm, setPwForm] = useState({
@@ -351,7 +354,6 @@ export default function SettingsPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  /* Clear pending redirect on unmount (no setState here) */
   useEffect(() => {
     return () => {
       if (redirectTimer.current) clearTimeout(redirectTimer.current);
@@ -365,7 +367,6 @@ export default function SettingsPage() {
     );
 
   const initials = getInitials(user?.name, user?.email);
-
   const today = new Date().toISOString().slice(0, 10);
 
   const updateProfileField = <K extends keyof ProfileForm>(
@@ -385,24 +386,69 @@ export default function SettingsPage() {
     }
   };
 
+  /* ---------- Photo upload handler ---------- */
+  const handlePhotoFile = async (file: File) => {
+    setPhotoError(null);
+
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Please select an image file.");
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoError("Image is too large. Please pick a file under 2 MB.");
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      const updated = await authService.uploadMyPhoto(file);
+
+      setProfileDraft((prev) => ({
+        ...prev,
+        photo:
+          updated.photo && updated.photo !== DEFAULT_PHOTO ? updated.photo : "",
+      }));
+
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+    } catch (err) {
+      setPhotoError(
+        (err as { message?: string }).message ?? "Failed to upload photo",
+      );
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  /* ---------- Photo remove handler ---------- */
+  const handlePhotoRemove = async () => {
+    setPhotoError(null);
+    setUploadingPhoto(true);
+    try {
+      await authService.updateMe({ photo: DEFAULT_PHOTO });
+      setProfileDraft((prev) => ({ ...prev, photo: "" }));
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+    } catch (err) {
+      setPhotoError(
+        (err as { message?: string }).message ?? "Failed to remove photo",
+      );
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  /* ---------- Save profile ---------- */
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
 
     const name = profileForm.name.trim();
-    const photo = profileForm.photo.trim();
     const phoneNumber = profileForm.phoneNumber.replace(/[^\d+]/g, "");
 
     if (name.length < 2 || name.length > 50) {
       setProfileStatus({
         type: "error",
         message: "Name must be between 2 and 50 characters",
-      });
-      return;
-    }
-    if (photo && !isImageSrc(photo) && !photo.startsWith("data:image/")) {
-      setProfileStatus({
-        type: "error",
-        message: "Profile photo must be an uploaded image or a valid link",
       });
       return;
     }
@@ -426,7 +472,6 @@ export default function SettingsPage() {
     try {
       await authService.updateMe({
         name,
-        photo: photo || DEFAULT_PHOTO,
         bio: profileForm.bio.trim(),
         phoneNumber,
         dateOfBirth: profileForm.dateOfBirth || null,
@@ -536,7 +581,7 @@ export default function SettingsPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-white">
-        {/* ============================ HERO ============================ */}
+        {/* HERO */}
         <section className="relative overflow-hidden bg-linear-to-br from-emerald-50 via-white to-sky-50">
           <div
             aria-hidden
@@ -575,7 +620,6 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {/* ============================ FORMS ============================ */}
         <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
           {/* ---------- Profile ---------- */}
           <form
@@ -588,7 +632,9 @@ export default function SettingsPage() {
               <PhotoUpload
                 photo={profileForm.photo}
                 initials={initials}
-                onChange={(v) => updateProfileField("photo", v)}
+                uploading={uploadingPhoto}
+                onPickFile={handlePhotoFile}
+                onRemove={handlePhotoRemove}
               />
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold text-gray-900">
@@ -600,7 +646,16 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* --- Basics --- */}
+            {photoError && (
+              <p
+                role="alert"
+                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+              >
+                {photoError}
+              </p>
+            )}
+
+            {/* Basics */}
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 id="name"
@@ -658,7 +713,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* --- Languages & expertise --- */}
             <SubHeading>Languages &amp; expertise</SubHeading>
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
@@ -679,7 +733,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* --- Address --- */}
             <SubHeading>Address</SubHeading>
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
@@ -720,7 +773,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* --- Preferences --- */}
             <SubHeading>Preferences</SubHeading>
             <div className="space-y-3">
               <ToggleRow
@@ -752,7 +804,10 @@ export default function SettingsPage() {
               <button
                 type="submit"
                 disabled={
-                  profileStatus.type === "saving" || !user || !isProfileDirty
+                  profileStatus.type === "saving" ||
+                  uploadingPhoto ||
+                  !user ||
+                  !isProfileDirty
                 }
                 className={PRIMARY_BTN}
               >
