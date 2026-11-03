@@ -16,14 +16,25 @@ type Status = {
 type ProfileForm = {
   name: string;
   email: string;
+  photo: string;
   bio: string;
-  phone: string;
+  phoneNumber: string;
+  dateOfBirth: string;
+  languages: string;
+  expertise: string;
+  street: string;
+  city: string;
+  state: string;
+  country: string;
+  postalCode: string;
+  newsletter: boolean;
+  emailNotifications: boolean;
+  smsNotifications: boolean;
 };
 
-const PROFILE_FIELDS: (keyof ProfileForm)[] = ["name", "email", "bio", "phone"];
-
 const MIN_PASSWORD_LENGTH = 8;
-const BIO_MAX = 300;
+const BIO_MAX = 500;
+const DEFAULT_PHOTO = "default.jpg";
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:bg-gray-50 disabled:text-gray-500";
@@ -32,6 +43,15 @@ const LABEL_CLASS = "mb-1.5 block text-sm font-medium text-gray-700";
 
 const PRIMARY_BTN =
   "rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 hover:shadow-emerald-700/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 disabled:opacity-60 disabled:shadow-none";
+
+const splitList = (value: string) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const isImageSrc = (value?: string) =>
+  !!value && (/^https?:\/\//i.test(value) || value.startsWith("/"));
 
 function StatusMessage({ status }: { status: Status }) {
   if (!status.message) return null;
@@ -75,6 +95,117 @@ function SectionHeader({
   );
 }
 
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="border-t border-gray-100 pt-5 text-sm font-semibold uppercase tracking-wide text-gray-500">
+      {children}
+    </h3>
+  );
+}
+
+function TextField({
+  id,
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  autoComplete,
+  hint,
+  disabled,
+  max,
+  className,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  autoComplete?: string;
+  hint?: string;
+  disabled?: boolean;
+  max?: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        disabled={disabled}
+        max={max}
+        className={INPUT_CLASS}
+      />
+      {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+    </div>
+  );
+}
+
+function ToggleRow({
+  id,
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 transition hover:border-emerald-200"
+    >
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-emerald-600"
+      />
+      <span>
+        <span className="block text-sm font-medium text-gray-800">{label}</span>
+        <span className="block text-xs text-gray-500">{description}</span>
+      </span>
+    </label>
+  );
+}
+
+function Avatar({
+  src,
+  initial,
+  className,
+}: {
+  src?: string;
+  initial: string;
+  className: string;
+}) {
+  if (isImageSrc(src)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt="" className={`${className} object-cover`} />
+    );
+  }
+  return (
+    <span
+      className={`${className} flex items-center justify-center bg-linear-to-br from-emerald-500 to-sky-500 font-bold text-white`}
+    >
+      {initial}
+    </span>
+  );
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -91,8 +222,20 @@ export default function SettingsPage() {
     () => ({
       name: user?.name ?? "",
       email: user?.email ?? "",
+      photo: user?.photo && user.photo !== DEFAULT_PHOTO ? user.photo : "",
       bio: user?.bio ?? "",
-      phone: user?.phone ?? "",
+      phoneNumber: user?.phoneNumber ?? "",
+      dateOfBirth: user?.dateOfBirth ? user.dateOfBirth.slice(0, 10) : "",
+      languages: (user?.languages ?? []).join(", "),
+      expertise: (user?.expertise ?? []).join(", "),
+      street: user?.address?.street ?? "",
+      city: user?.address?.city ?? "",
+      state: user?.address?.state ?? "",
+      country: user?.address?.country ?? "",
+      postalCode: user?.address?.postalCode ?? "",
+      newsletter: user?.preferences?.newsletter ?? false,
+      emailNotifications: user?.preferences?.emailNotifications ?? true,
+      smsNotifications: user?.preferences?.smsNotifications ?? false,
     }),
     [user],
   );
@@ -123,14 +266,22 @@ export default function SettingsPage() {
   }, []);
 
   const isProfileDirty =
-    !!user && PROFILE_FIELDS.some((f) => profileForm[f] !== baseProfile[f]);
+    !!user &&
+    (Object.keys(profileForm) as (keyof ProfileForm)[]).some(
+      (field) => profileForm[field] !== baseProfile[field],
+    );
 
   const initial = (user?.name || user?.email || "?")
     .trim()
     .charAt(0)
     .toUpperCase();
 
-  const updateProfileField = (field: keyof ProfileForm, value: string) => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const updateProfileField = <K extends keyof ProfileForm>(
+    field: K,
+    value: ProfileForm[K],
+  ) => {
     setProfileDraft((prev) => ({ ...prev, [field]: value }));
     if (profileStatus.type !== "idle" && profileStatus.type !== "saving") {
       setProfileStatus({ type: "idle" });
@@ -147,12 +298,37 @@ export default function SettingsPage() {
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
 
-    if (!profileForm.name.trim()) {
-      setProfileStatus({ type: "error", message: "Name is required" });
+    const name = profileForm.name.trim();
+    const photo = profileForm.photo.trim();
+    const phoneNumber = profileForm.phoneNumber.replace(/[^\d+]/g, "");
+
+    if (name.length < 2 || name.length > 50) {
+      setProfileStatus({
+        type: "error",
+        message: "Name must be between 2 and 50 characters",
+      });
       return;
     }
-    if (!profileForm.email.trim()) {
-      setProfileStatus({ type: "error", message: "Email is required" });
+    if (photo && !isImageSrc(photo)) {
+      setProfileStatus({
+        type: "error",
+        message:
+          "Profile photo must be a link starting with http:// or https://",
+      });
+      return;
+    }
+    if (phoneNumber && !/^\+?\d{7,15}$/.test(phoneNumber)) {
+      setProfileStatus({
+        type: "error",
+        message: "Enter a valid phone number (7–15 digits)",
+      });
+      return;
+    }
+    if (profileForm.dateOfBirth && profileForm.dateOfBirth > today) {
+      setProfileStatus({
+        type: "error",
+        message: "Date of birth cannot be in the future",
+      });
       return;
     }
 
@@ -160,11 +336,25 @@ export default function SettingsPage() {
 
     try {
       await authService.updateMe({
-        ...profileForm,
-        name: profileForm.name.trim(),
-        email: profileForm.email.trim(),
-        phone: profileForm.phone.trim(),
+        name,
+        photo: photo || DEFAULT_PHOTO,
         bio: profileForm.bio.trim(),
+        phoneNumber,
+        dateOfBirth: profileForm.dateOfBirth || null,
+        languages: splitList(profileForm.languages),
+        expertise: splitList(profileForm.expertise),
+        address: {
+          street: profileForm.street.trim(),
+          city: profileForm.city.trim(),
+          state: profileForm.state.trim(),
+          country: profileForm.country.trim(),
+          postalCode: profileForm.postalCode.trim(),
+        },
+        preferences: {
+          newsletter: profileForm.newsletter,
+          emailNotifications: profileForm.emailNotifications,
+          smsNotifications: profileForm.smsNotifications,
+        },
       });
       await refetch();
       queryClient.invalidateQueries({ queryKey: ["me"] });
@@ -277,9 +467,11 @@ export default function SettingsPage() {
             </Link>
 
             <div className="mt-5 flex flex-wrap items-center gap-5">
-              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-emerald-500 to-sky-500 text-2xl font-bold text-white shadow-md">
-                {initial}
-              </span>
+              <Avatar
+                src={baseProfile.photo}
+                initial={initial}
+                className="h-16 w-16 shrink-0 rounded-full text-2xl shadow-md"
+              />
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">
                   <span className="bg-linear-to-r from-emerald-600 to-sky-600 bg-clip-text text-transparent">
@@ -308,47 +500,60 @@ export default function SettingsPage() {
               subtitle="This information is shown on your account and reviews."
             />
 
+            {/* --- Basics --- */}
+            <div className="flex items-center gap-4">
+              <Avatar
+                src={profileForm.photo.trim()}
+                initial={initial}
+                className="h-14 w-14 shrink-0 rounded-full text-xl"
+              />
+              <TextField
+                id="photo"
+                label="Profile photo link"
+                type="url"
+                value={profileForm.photo}
+                onChange={(v) => updateProfileField("photo", v)}
+                placeholder="https://example.com/me.jpg"
+                className="flex-1"
+              />
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="name" className={LABEL_CLASS}>
-                  Name
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  autoComplete="name"
-                  value={profileForm.name}
-                  onChange={(e) => updateProfileField("name", e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </div>
-              <div>
-                <label htmlFor="email" className={LABEL_CLASS}>
-                  Email
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={profileForm.email}
-                  onChange={(e) => updateProfileField("email", e.target.value)}
-                  className={INPUT_CLASS}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor="phone" className={LABEL_CLASS}>
-                  Phone
-                </label>
-                <input
-                  id="phone"
-                  type="tel"
-                  autoComplete="tel"
-                  value={profileForm.phone}
-                  onChange={(e) => updateProfileField("phone", e.target.value)}
-                  placeholder="+234 800 000 0000"
-                  className={INPUT_CLASS}
-                />
-              </div>
+              <TextField
+                id="name"
+                label="Name"
+                autoComplete="name"
+                value={profileForm.name}
+                onChange={(v) => updateProfileField("name", v)}
+              />
+              <TextField
+                id="email"
+                label="Email"
+                type="email"
+                autoComplete="email"
+                value={profileForm.email}
+                onChange={() => {}}
+                disabled
+                hint="Email can't be changed here."
+              />
+              <TextField
+                id="phoneNumber"
+                label="Phone"
+                type="tel"
+                autoComplete="tel"
+                value={profileForm.phoneNumber}
+                onChange={(v) => updateProfileField("phoneNumber", v)}
+                placeholder="+234 800 000 0000"
+              />
+              <TextField
+                id="dateOfBirth"
+                label="Date of birth"
+                type="date"
+                autoComplete="bday"
+                max={today}
+                value={profileForm.dateOfBirth}
+                onChange={(v) => updateProfileField("dateOfBirth", v)}
+              />
               <div className="sm:col-span-2">
                 <div className="flex items-end justify-between">
                   <label htmlFor="bio" className={LABEL_CLASS}>
@@ -368,6 +573,94 @@ export default function SettingsPage() {
                   className={`${INPUT_CLASS} resize-none`}
                 />
               </div>
+            </div>
+
+            {/* --- Languages & expertise --- */}
+            <SubHeading>Languages &amp; expertise</SubHeading>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                id="languages"
+                label="Languages"
+                value={profileForm.languages}
+                onChange={(v) => updateProfileField("languages", v)}
+                placeholder="English, Yoruba, French"
+                hint="Separate with commas."
+              />
+              <TextField
+                id="expertise"
+                label="Expertise"
+                value={profileForm.expertise}
+                onChange={(v) => updateProfileField("expertise", v)}
+                placeholder="Hiking, Photography"
+                hint="Separate with commas."
+              />
+            </div>
+
+            {/* --- Address --- */}
+            <SubHeading>Address</SubHeading>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                id="street"
+                label="Street"
+                autoComplete="street-address"
+                value={profileForm.street}
+                onChange={(v) => updateProfileField("street", v)}
+                className="sm:col-span-2"
+              />
+              <TextField
+                id="city"
+                label="City"
+                autoComplete="address-level2"
+                value={profileForm.city}
+                onChange={(v) => updateProfileField("city", v)}
+              />
+              <TextField
+                id="state"
+                label="State / Region"
+                autoComplete="address-level1"
+                value={profileForm.state}
+                onChange={(v) => updateProfileField("state", v)}
+              />
+              <TextField
+                id="country"
+                label="Country"
+                autoComplete="country-name"
+                value={profileForm.country}
+                onChange={(v) => updateProfileField("country", v)}
+              />
+              <TextField
+                id="postalCode"
+                label="Postal code"
+                autoComplete="postal-code"
+                value={profileForm.postalCode}
+                onChange={(v) => updateProfileField("postalCode", v)}
+              />
+            </div>
+
+            {/* --- Preferences --- */}
+            <SubHeading>Preferences</SubHeading>
+            <div className="space-y-3">
+              <ToggleRow
+                id="newsletter"
+                label="Newsletter"
+                description="Occasional news and tour announcements."
+                checked={profileForm.newsletter}
+                onChange={(v) => updateProfileField("newsletter", v)}
+              />
+              <ToggleRow
+                id="emailNotifications"
+                label="Email notifications"
+                description="Booking updates and review replies by email."
+                checked={profileForm.emailNotifications}
+                onChange={(v) => updateProfileField("emailNotifications", v)}
+              />
+              <ToggleRow
+                id="smsNotifications"
+                label="SMS notifications"
+                description="Important booking updates by text message."
+                checked={profileForm.smsNotifications}
+                onChange={(v) => updateProfileField("smsNotifications", v)}
+              />
             </div>
 
             <StatusMessage status={profileStatus} />
