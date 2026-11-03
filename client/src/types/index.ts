@@ -1,3 +1,17 @@
+export interface UserAddress {
+  street?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+}
+
+export interface UserPreferences {
+  newsletter?: boolean;
+  emailNotifications?: boolean;
+  smsNotifications?: boolean;
+}
+
 export interface User {
   _id: string;
   name: string;
@@ -12,6 +26,11 @@ export interface User {
   certifications?: string[];
   assignedTours?: unknown[];
   createdAt?: string;
+
+  dateOfBirth?: string | null;
+  expertise?: string[];
+  address?: UserAddress;
+  preferences?: UserPreferences;
 }
 
 export interface TourLocation {
