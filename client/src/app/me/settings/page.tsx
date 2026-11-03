@@ -207,6 +207,98 @@ function Avatar({
   );
 }
 
+function PhotoUpload({
+  photo,
+  initials,
+  onChange,
+}: {
+  photo: string;
+  initials: string;
+  onChange: (value: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please select an image file.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Image is too large. Please pick a file under 2MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        onChange(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative">
+        <Avatar
+          src={isImageSrc(photo) ? photo : (getPhotoUrl(photo) ?? undefined)}
+          initial={initials}
+          className="h-16 w-16 shrink-0 rounded-full text-xl shadow-sm"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="Upload profile photo"
+          title="Upload profile photo"
+          className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-white shadow-md transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+        >
+          {/* Camera / upload icon */}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-3.5 w-3.5"
+            aria-hidden
+          >
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+            <circle cx="12" cy="13" r="3" />
+          </svg>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFile}
+          className="hidden"
+        />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-gray-800">Profile photo</p>
+        <p className="text-xs text-gray-500">
+          Click the camera icon to upload a new photo.
+        </p>
+        {photo && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="mt-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+          >
+            Remove photo
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -272,7 +364,7 @@ export default function SettingsPage() {
       (field) => profileForm[field] !== baseProfile[field],
     );
 
- const initials = getInitials(user?.name, user?.email);
+  const initials = getInitials(user?.name, user?.email);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -307,11 +399,10 @@ export default function SettingsPage() {
       });
       return;
     }
-    if (photo && !isImageSrc(photo)) {
+    if (photo && !isImageSrc(photo) && !photo.startsWith("data:image/")) {
       setProfileStatus({
         type: "error",
-        message:
-          "Profile photo must be a link starting with http:// or https://",
+        message: "Profile photo must be an uploaded image or a valid link",
       });
       return;
     }
@@ -492,30 +583,24 @@ export default function SettingsPage() {
             noValidate
             className="space-y-5 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:border-emerald-200 hover:shadow-md"
           >
-            <SectionHeader
-              icon="👤"
-              title="Profile"
-              subtitle="This information is shown on your account and reviews."
-            />
-
-            {/* --- Basics --- */}
+            {/* Photo + name as the section header */}
             <div className="flex items-center gap-4">
-              <Avatar
-                src={getPhotoUrl(profileForm.photo.trim()) ?? undefined}
-                initial={initials}
-                className="h-14 w-14 shrink-0 rounded-full text-xl"
-              />
-              <TextField
-                id="photo"
-                label="Profile photo link"
-                type="url"
-                value={profileForm.photo}
+              <PhotoUpload
+                photo={profileForm.photo}
+                initials={initials}
                 onChange={(v) => updateProfileField("photo", v)}
-                placeholder="https://example.com/me.jpg"
-                className="flex-1"
               />
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold text-gray-900">
+                  {profileForm.name || "Your profile"}
+                </h2>
+                <p className="mt-0.5 text-sm text-gray-600">
+                  This information is shown on your account and reviews.
+                </p>
+              </div>
             </div>
 
+            {/* --- Basics --- */}
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 id="name"
