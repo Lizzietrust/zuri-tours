@@ -104,4 +104,15 @@ export const authService = {
     await api.delete("/users/me");
     clearToken();
   },
+
+  async uploadMyPhoto(file: File): Promise<User> {
+    const form = new FormData();
+    form.append("photo", file);
+
+    const { data } = await api.patch<MeResponse>("/users/me/photo", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    return data.data.user;
+  },
 };
