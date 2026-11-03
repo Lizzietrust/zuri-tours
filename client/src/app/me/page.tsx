@@ -4,9 +4,11 @@ import { useState } from "react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
+import { getInitials, getPhotoUrl } from "@/lib/user";
+import type { User } from "@/types";
 
 /* ------------------------------------------------------------------ */
-/* Types (add these fields to your shared User type when you can)      */
+/* Types: built on the shared User type, plus guide-only fields        */
 /* ------------------------------------------------------------------ */
 type Labelled = string | { name?: string; title?: string; language?: string };
 type TourRef =
@@ -26,14 +28,11 @@ type Availability = Partial<
   >
 >;
 
-type ExtendedUser = {
-  _id?: string;
-  name?: string;
-  email?: string;
-  photo?: string;
-  role?: string;
-  phone?: string;
-  bio?: string;
+type ExtendedUser = Omit<
+  User,
+  "assignedTours" | "languages" | "certifications"
+> & {
+  updatedAt?: string;
   assignedTours?: TourRef[];
   guideSpecialties?: Labelled[];
   languages?: Labelled[];
@@ -47,8 +46,6 @@ type ExtendedUser = {
     completionRate?: number;
     averageRating?: number;
   };
-  createdAt?: string;
-  updatedAt?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -91,9 +88,6 @@ const DAYS = [
   { key: "sunday", label: "Sun" },
 ] as const;
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const PHOTO_PATH = "/img/users";
-
 const labelOf = (item: Labelled): string =>
   typeof item === "string"
     ? item
@@ -113,18 +107,6 @@ const formatDate = (iso?: string, withTime = false) => {
 
 const pct = (n?: number) => (typeof n === "number" ? `${n}%` : "—");
 const num = (n?: number) => (typeof n === "number" ? String(n) : "—");
-
-const getInitials = (name?: string, email?: string): string => {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-  return (email?.trim().charAt(0) || "?").toUpperCase();
-};
 
 /* ------------------------------------------------------------------ */
 /* Small presentational pieces                                         */
@@ -232,13 +214,7 @@ export default function MePage() {
   const [copied, setCopied] = useState(false);
 
   const initials = getInitials(user?.name, user?.email);
-
-  const photoUrl =
-    user?.photo && user.photo !== "default.jpg"
-      ? user.photo.startsWith("http")
-        ? user.photo
-        : `${API_URL}${PHOTO_PATH}/${user.photo}`
-      : null;
+  const photoUrl = getPhotoUrl(user?.photo);
 
   const specialties = (user?.guideSpecialties ?? [])
     .map(labelOf)
@@ -387,7 +363,9 @@ export default function MePage() {
                     <Field label="Last updated">
                       {formatDate(user.updatedAt, true)}
                     </Field>
-                    {user.phone && <Field label="Phone">{user.phone}</Field>}
+                    {user.phoneNumber && (
+                      <Field label="Phone">{user.phoneNumber}</Field>
+                    )}
                     {user.bio && (
                       <Field label="Bio" className="sm:col-span-2">
                         <span className="text-pretty">{user.bio}</span>
