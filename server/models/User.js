@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import validator from "validator";
+import { isValidPhoneNumber } from "libphonenumber-js"; // eslint-disable-line import/no-extraneous-dependencies
 
 /* ============================================================
    VALIDATORS
@@ -369,6 +370,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       maxlength: [20, "Phone number is too long"],
+      validate: {
+        validator(value) {
+          if (!value) return true;
+
+          return isValidPhoneNumber(value);
+        },
+        message: "Please provide a valid international phone number",
+      },
     },
     dateOfBirth: {
       type: Date,
