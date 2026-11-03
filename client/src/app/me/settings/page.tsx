@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/services/auth";
+import { getInitials, getPhotoUrl } from "@/lib/user";
 
 type Status = {
   type: "idle" | "saving" | "ok" | "error";
@@ -271,10 +272,7 @@ export default function SettingsPage() {
       (field) => profileForm[field] !== baseProfile[field],
     );
 
-  const initial = (user?.name || user?.email || "?")
-    .trim()
-    .charAt(0)
-    .toUpperCase();
+ const initials = getInitials(user?.name, user?.email);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -468,8 +466,8 @@ export default function SettingsPage() {
 
             <div className="mt-5 flex flex-wrap items-center gap-5">
               <Avatar
-                src={baseProfile.photo}
-                initial={initial}
+                src={getPhotoUrl(baseProfile.photo) ?? undefined}
+                initial={initials}
                 className="h-16 w-16 shrink-0 rounded-full text-2xl shadow-md"
               />
               <div>
@@ -503,8 +501,8 @@ export default function SettingsPage() {
             {/* --- Basics --- */}
             <div className="flex items-center gap-4">
               <Avatar
-                src={profileForm.photo.trim()}
-                initial={initial}
+                src={getPhotoUrl(profileForm.photo.trim()) ?? undefined}
+                initial={initials}
                 className="h-14 w-14 shrink-0 rounded-full text-xl"
               />
               <TextField
