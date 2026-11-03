@@ -13,6 +13,28 @@ type MeResponse = {
   data: { user: User };
 };
 
+export type UpdateMePayload = {
+  name?: string;
+  photo?: string;
+  bio?: string;
+  phoneNumber?: string;
+  dateOfBirth?: string | null;
+  languages?: string[];
+  expertise?: string[];
+  address?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postalCode?: string;
+  };
+  preferences?: {
+    newsletter?: boolean;
+    emailNotifications?: boolean;
+    smsNotifications?: boolean;
+  };
+};
+
 export const authService = {
   async register(payload: {
     name: string;
@@ -40,13 +62,7 @@ export const authService = {
     return data.data.user;
   },
 
-  async updateMe(payload: {
-    name?: string;
-    email?: string;
-    photo?: string;
-    bio?: string;
-    phone?: string;
-  }): Promise<User> {
+  async updateMe(payload: UpdateMePayload): Promise<User> {
     const { data } = await api.patch<MeResponse>("/users/me", payload);
     return data.data.user;
   },
