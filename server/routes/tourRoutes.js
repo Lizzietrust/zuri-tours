@@ -9,6 +9,8 @@ import {
   restoreTour,
   permanentDeleteTour,
   bulkDeleteTours,
+  adminGetAllTours,
+  bulkSoftDeleteTours,
   getTourStats,
   getMonthlyPlan,
   getToursByPriceRange,
@@ -110,6 +112,12 @@ router
   .get(protect, hasPermission("view:stats"), getMonthlyPlan);
 
 /* ============================================================
+   ADMIN LISTING (all tours incl. trashed + secret)
+   ============================================================ */
+
+router.route("/admin/all").get(protect, authorize("admin"), adminGetAllTours);
+
+/* ============================================================
    MAIN COLLECTION
    ============================================================ */
 
@@ -131,6 +139,10 @@ router
 router
   .route("/bulk/delete")
   .delete(protect, authorize("admin"), bulkDeleteTours);
+
+router
+  .route("/bulk/soft-delete")
+  .patch(protect, authorize("admin"), bulkSoftDeleteTours);
 
 /* ============================================================
    SINGLE TOUR
