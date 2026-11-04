@@ -10,8 +10,6 @@ import {
   bulkDeleteReviews,
   markHelpful,
   addReviewResponse,
-  approveReview,
-  rejectReview,
   flagReview,
   getReviewStats,
   getMyReviews,
@@ -19,8 +17,7 @@ import {
   getBatchTourReviews,
   getMyReviewForTour,
   updateMyReview,
-  getModerationQueue,
-  hideReview,
+  adminGetAllReviews,
 } from "../controllers/reviewController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
 import {
@@ -34,30 +31,22 @@ import {
 
 const router = express.Router({ mergeParams: true });
 
-/* ============================================================
-   STATIC / NAMED ROUTES — MUST come before /:id
-   ============================================================ */
-
-/* ---------- Current user's own review for a specific tour ---------- */
+/* ---------- Static / named routes (before /:id) ---------- */
 router
   .route("/me/:tourId")
   .get(protect, getMyReviewForTour)
   .patch(protect, userUpdateLimiter, updateMyReview);
 
-/* ---------- Current user's own reviews (all tours) ---------- */
 router.route("/my-reviews").get(protect, getMyReviews);
-
-/* ---------- Tour-scoped custom routes ---------- */
 router.route("/stats").get(getReviewStats);
 router.route("/public").get(getTourReviews);
 
-/* ---------- Admin moderation queue ---------- */
-router
-  .route("/moderation-queue")
-  .get(protect, authorize("admin"), getModerationQueue);
-
-/* ---------- Batch (admin only) ---------- */
+/* ---------- Admin ---------- */
+router.route("/admin/all").get(protect, authorize("admin"), adminGetAllReviews);
 router.route("/batch").post(protect, authorize("admin"), getBatchTourReviews);
+router
+  .route("/bulk/delete")
+  .delete(protect, authorize("admin"), bulkDeleteReviews);
 
 /* ---------- Root collection ---------- */
 router
@@ -65,71 +54,28 @@ router
   .get(getAllReviews)
   .post(protect, reviewCreationLimiter, validateReview, createReview);
 
-/* ---------- Bulk (static, so before /:id) ---------- */
-router
-  .route("/bulk/delete")
-  .delete(protect, authorize("admin"), bulkDeleteReviews);
-
-/* ============================================================
-   PARAM ROUTES — /:id must come LAST
-   ============================================================ */
-
+/* ---------- Param routes (LAST) ---------- */
 router
   .route("/:id")
   .get(getReview)
   .patch(protect, checkValidId, userUpdateLimiter, updateReview)
   .delete(protect, checkValidId, deleteReview);
 
-/* ---------- Actions on a specific review ---------- */
 router
   .route("/:id/helpful")
   .patch(protect, checkValidId, userUpdateLimiter, markHelpful);
-
 router
   .route("/:id/response")
   .post(protect, checkValidId, userUpdateLimiter, addReviewResponse);
-
-router
-  .route("/:id/approve")
-  .patch(
-    protect,
-    authorize("admin"),
-    checkValidId,
-    userUpdateLimiter,
-    approveReview,
-  );
-
-router
-  .route("/:id/reject")
-  .patch(
-    protect,
-    authorize("admin"),
-    checkValidId,
-    userUpdateLimiter,
-    rejectReview,
-  );
-
-router
-  .route("/:id/hide")
-  .patch(
-    protect,
-    authorize("admin"),
-    checkValidId,
-    userUpdateLimiter,
-    hideReview,
-  );
-
 router
   .route("/:id/flag")
   .post(protect, checkValidId, userUpdateLimiter, flagReview);
 
-/* ---------- Admin recovery ---------- */
-router
-  .route("/:id/permanent")
-  .delete(protect, authorize("admin"), checkValidId, permanentDeleteReview);
-
 router
   .route("/:id/restore")
   .patch(protect, authorize("admin"), checkValidId, restoreReview);
+router
+  .route("/:id/permanent")
+  .delete(protect, authorize("admin"), checkValidId, permanentDeleteReview);
 
 export default router;
