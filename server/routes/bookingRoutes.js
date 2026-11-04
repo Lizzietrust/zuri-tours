@@ -7,6 +7,7 @@ import {
   getBooking,
   cancelBooking,
   getAllBookings,
+  adminUpdateBooking,
 } from "../controllers/bookingController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
 import { checkValidId } from "../middleware/validationMiddleware.js";
@@ -31,5 +32,9 @@ router.route("/:id").get(checkValidId, getBooking);
 router.route("/:id/cancel").patch(checkValidId, cancelBooking);
 
 router.route("/").get(authorize("admin"), getAllBookings);
+
+router
+  .route("/:id/status")
+  .patch(authorize("admin"), checkValidId, adminUpdateBooking);
 
 export default router;
