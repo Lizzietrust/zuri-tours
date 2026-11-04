@@ -41,22 +41,21 @@ const reviewSchema = new mongoose.Schema(
       respondedAt: { type: Date },
     },
 
-    /* ---------- Post-moderation status ---------- */
+    /* ---------- Visibility ----------
+       "approved" = live on the site (reviews publish instantly)
+       "removed"  = taken down by an admin (restorable)            */
     status: {
       type: String,
-      enum: ["approved", "pending", "rejected", "flagged", "hidden"],
+      enum: ["approved", "removed"],
       default: "approved",
     },
 
-    /* ---------- Post-moderation audit ---------- */
-    needsModeration: {
-      type: Boolean,
-      default: true,
-    },
+    /* ---------- Removal / restore audit trail (set by admins) ---------- */
     moderatedAt: Date,
     moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
     moderationNote: { type: String, maxlength: 500 },
 
+    /* ---------- User reports (do NOT change status) ---------- */
     flagReasons: [
       {
         reason: {
@@ -119,7 +118,6 @@ reviewSchema.index({ helpfulCount: -1 });
 reviewSchema.index({ tour: 1, status: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, status: 1 });
 reviewSchema.index({ rating: -1, helpfulCount: -1 });
-reviewSchema.index({ needsModeration: 1, createdAt: -1 });
 reviewSchema.index(
   { review: "text", title: "text" },
   {
@@ -164,6 +162,10 @@ reviewSchema.virtual("canBeHelpful").get(function getCanBeHelpful() {
   return this.status === "approved";
 });
 
+reviewSchema.virtual("flagCount").get(function getFlagCount() {
+  return this.flagReasons ? this.flagReasons.length : 0;
+});
+
 /* ---------------------------- Queries ----------------------------- */
 
 reviewSchema.query = {
@@ -186,8 +188,11 @@ reviewSchema.query = {
   approved() {
     return this.where("status").equals("approved");
   },
-  pending() {
-    return this.where("status").equals("pending");
+  removed() {
+    return this.where("status").equals("removed");
+  },
+  reported() {
+    return this.where("flagReasons.0").exists(true);
   },
   verified() {
     return this.where("isVerifiedPurchase").equals(true);
@@ -575,6 +580,8 @@ reviewSchema.methods.addResponse = async function addResponse(
   return this;
 };
 
+/* A report only records the flag. It never hides the review —
+   admins review reports and remove/restore from the admin panel. */
 reviewSchema.methods.flagReview = async function flagReview(
   reason,
   description,
@@ -587,44 +594,6 @@ reviewSchema.methods.flagReview = async function flagReview(
     flaggedBy: flaggerId,
     flaggedAt: new Date(),
   });
-  if (this.flagReasons.length >= 3) {
-    this.status = "flagged";
-    this.needsModeration = true;
-  }
-  await this.save();
-
-  return this;
-};
-
-/* ---------- Post-moderation actions ---------- */
-
-reviewSchema.methods.approve = async function approve(moderatorId) {
-  this.status = "approved";
-  this.needsModeration = false;
-  this.moderatedAt = new Date();
-  if (moderatorId) this.moderatedBy = moderatorId;
-  await this.save();
-
-  return this;
-};
-
-reviewSchema.methods.reject = async function reject(moderatorId, note) {
-  this.status = "rejected";
-  this.needsModeration = false;
-  this.moderatedAt = new Date();
-  if (moderatorId) this.moderatedBy = moderatorId;
-  if (note) this.moderationNote = note;
-  await this.save();
-
-  return this;
-};
-
-reviewSchema.methods.hide = async function hide(moderatorId, note) {
-  this.status = "hidden";
-  this.needsModeration = false;
-  this.moderatedAt = new Date();
-  if (moderatorId) this.moderatedBy = moderatorId;
-  if (note) this.moderationNote = note;
   await this.save();
 
   return this;
@@ -649,10 +618,6 @@ reviewSchema.methods.editReview = async function editReview(
   if (extra.title !== undefined) this.title = extra.title;
   if (extra.isRecommended !== undefined)
     this.isRecommended = extra.isRecommended;
-
-  this.needsModeration = true;
-  this.moderatedAt = undefined;
-  this.moderatedBy = undefined;
 
   await this.save();
 
