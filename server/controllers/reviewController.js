@@ -4,9 +4,7 @@ import Tour from "../models/Tour.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
 import {
-  deleteOne,
   deleteMany,
-  restoreOne,
   permanentDeleteOne,
   createOne,
   updateOne,
@@ -91,28 +89,139 @@ const populateReviewFields = (query, populateOptions = {}) => {
 };
 
 /* ============================================================
-   DELETE FACTORY HANDLERS
+   DELETE / RESTORE HANDLERS
    ============================================================ */
 
-const deleteReview = deleteOne(Review, {
-  modelName: "Review",
-  softDelete: true,
-  idParam: "id",
-  beforeDelete: async (doc, req) => {
-    const isOwner = doc.user.toString() === req.user._id.toString();
-    const isAdmin = req.user.role === "admin";
-    const isTourCreator = await Tour.exists({
-      _id: doc.tour,
-      createdBy: req.user._id,
-    });
+const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    if (!isOwner && !isAdmin && !isTourCreator) {
-      throw new AppError("You are not authorized to delete this review", 403);
-    }
-  },
-  afterDelete: async (doc) => {
-    await Review.calcAverageRatings(doc.tour);
-  },
+/* Owner → hard delete (so they can write a new review).
+   Admin deleting someone else's review → soft "removed" (restorable). */
+const deleteReview = catchAsync(async (req, res, next) => {
+  const review = await Review.findById(req.params.id);
+
+  if (!review) return next(new AppError("Review not found", 404));
+
+  const isOwner = review.user.toString() === req.user._id.toString();
+  const isAdmin = req.user.role === "admin";
+
+  if (!isOwner && !isAdmin) {
+    return next(
+      new AppError("You are not authorized to delete this review", 403),
+    );
+  }
+
+  if (isAdmin && !isOwner) {
+    review.status = "removed";
+    review.moderatedAt = new Date();
+    review.moderatedBy = req.user._id;
+    review.moderationNote =
+      String(req.body?.reason || "").slice(0, 500) || undefined;
+    await review.save();
+    await Review.calcAverageRatings(review.tour);
+
+    return res.status(200).json({
+      status: "success",
+      message: "Review removed",
+      data: { review },
+    });
+  }
+
+  const tourId = review.tour;
+
+  await review.deleteOne();
+  await Review.calcAverageRatings(tourId);
+
+  return res
+    .status(200)
+    .json({ status: "success", message: "Review deleted", data: null });
+});
+
+const restoreReview = catchAsync(async (req, res, next) => {
+  if (req.user.role !== "admin") {
+    return next(new AppError("Only admins can restore reviews", 403));
+  }
+
+  const review = await Review.findById(req.params.id);
+
+  if (!review) return next(new AppError("Review not found", 404));
+  if (review.status !== "removed") {
+    return next(new AppError("This review is not removed", 400));
+  }
+
+  review.status = "approved";
+  review.moderatedAt = new Date();
+  review.moderatedBy = req.user._id;
+  review.moderationNote = undefined;
+  await review.save();
+  await Review.calcAverageRatings(review.tour);
+
+  return res.status(200).json({
+    status: "success",
+    message: "Review restored",
+    data: { review },
+  });
+});
+
+/* Admin: every review on the platform, any status */
+const adminGetAllReviews = catchAsync(async (req, res) => {
+  const {
+    status = "all",
+    rating,
+    tourId,
+    userId,
+    q,
+    flagged,
+    sort = "-createdAt",
+  } = req.query;
+
+  const filter = {};
+
+  if (status !== "all") filter.status = status;
+  if (rating) filter.rating = Number(rating);
+  if (tourId && mongoose.Types.ObjectId.isValid(tourId)) filter.tour = tourId;
+  if (userId && mongoose.Types.ObjectId.isValid(userId)) filter.user = userId;
+  if (flagged === "true") filter["flagReasons.0"] = { $exists: true };
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+
+    filter.$or = [{ review: rx }, { title: rx }];
+  }
+
+  const allowedSorts = [
+    "-createdAt",
+    "createdAt",
+    "-rating",
+    "rating",
+    "-helpfulCount",
+  ];
+  const sortBy = allowedSorts.includes(sort) ? sort : "-createdAt";
+  const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limitNum = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit, 10) || 20),
+  );
+
+  const [reviews, total] = await Promise.all([
+    Review.find(filter)
+      .setOptions({ _skipStatusFilter: true })
+      .sort(sortBy)
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
+      .populate({ path: "user", select: "name email photo" })
+      .populate({ path: "tour", select: "name slug imageCover" })
+      .populate({ path: "flagReasons.flaggedBy", select: "name email" })
+      .lean(),
+    Review.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    results: reviews.length,
+    total,
+    page: pageNum,
+    pages: Math.ceil(total / limitNum),
+    data: { reviews },
+  });
 });
 
 const permanentDeleteReview = permanentDeleteOne(Review, {
@@ -126,21 +235,6 @@ const permanentDeleteReview = permanentDeleteOne(Review, {
     return doc;
   },
   afterPermanentDelete: async (doc) => {
-    await Review.calcAverageRatings(doc.tour);
-  },
-});
-
-const restoreReview = restoreOne(Review, {
-  modelName: "Review",
-  idParam: "id",
-  beforeRestore: (doc, req) => {
-    if (req.user.role !== "admin") {
-      throw new AppError("Only admins can restore reviews", 403);
-    }
-
-    return doc;
-  },
-  afterRestore: async (doc) => {
     await Review.calcAverageRatings(doc.tour);
   },
 });
@@ -217,7 +311,6 @@ const createReview = createOne(Review, {
       isRecommended:
         data.isRecommended !== undefined ? data.isRecommended : true,
       status: "approved",
-      needsModeration: !isVerifiedPurchase,
       metadata: {
         userAgent: req.headers["user-agent"],
         ipAddress: req.ip || req.connection.remoteAddress,
@@ -247,7 +340,7 @@ const updateReview = updateOne(Review, {
     if (doc.user.toString() !== req.user._id.toString()) {
       throw new AppError("You are not authorized to update this review", 403);
     }
-    if (doc.status === "rejected" || doc.status === "flagged") {
+    if (doc.status === "removed") {
       throw new AppError("This review cannot be edited", 400);
     }
   },
@@ -270,10 +363,6 @@ const updateReview = updateOne(Review, {
       editedBy: req.user._id,
     });
     updateData.editHistory = editHistory;
-
-    updateData.needsModeration = true;
-    updateData.moderatedAt = undefined;
-    updateData.moderatedBy = undefined;
 
     return updateData;
   },
@@ -477,110 +566,6 @@ const addReviewResponse = catchAsync(async (req, res) => {
   });
 });
 
-/* ---------- Admin moderation ---------- */
-
-const approveReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const review = await Review.findById(id);
-
-  if (!review) throw new AppError("Review not found", 404);
-
-  if (req.user.role !== "admin") {
-    throw new AppError("You are not authorized to approve reviews", 403);
-  }
-
-  await review.approve(req.user._id);
-
-  const populatedReview = await populateReviewFields(Review.findById(id), {
-    populateUser: true,
-    populateTour: true,
-    populateResponseUser: true,
-    populateFlagUsers: true,
-  }).lean();
-
-  res.status(200).json({
-    status: "success",
-    message: "Review approved successfully",
-    data: { review: populatedReview },
-  });
-});
-
-const rejectReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const { note } = req.body;
-
-  const review = await Review.findById(id);
-
-  if (!review) throw new AppError("Review not found", 404);
-
-  if (req.user.role !== "admin") {
-    throw new AppError("You are not authorized to reject reviews", 403);
-  }
-
-  await review.reject(req.user._id, note);
-
-  res.status(200).json({
-    status: "success",
-    message: "Review rejected successfully",
-  });
-});
-
-const hideReview = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const { note } = req.body;
-
-  const review = await Review.findById(id);
-
-  if (!review) throw new AppError("Review not found", 404);
-
-  if (req.user.role !== "admin") {
-    throw new AppError("Only admins can hide reviews", 403);
-  }
-
-  await review.hide(req.user._id, note);
-
-  res.status(200).json({
-    status: "success",
-    message: "Review hidden successfully",
-    data: { review },
-  });
-});
-
-const getModerationQueue = catchAsync(async (req, res) => {
-  const { page = 1, limit = 20, status } = req.query;
-
-  if (req.user.role !== "admin") {
-    throw new AppError("Only admins can view the moderation queue", 403);
-  }
-
-  const filter = { needsModeration: true };
-
-  if (status && status !== "all") filter.status = status;
-
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-
-  const [reviews, total] = await Promise.all([
-    Review.find(filter)
-      .sort("-createdAt")
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum)
-      .populate({ path: "user", select: "name email profileImage role" })
-      .populate({ path: "tour", select: "name slug imageCover" })
-      .lean(),
-    Review.countDocuments(filter),
-  ]);
-
-  res.status(200).json({
-    status: "success",
-    results: reviews.length,
-    total,
-    page: pageNum,
-    pages: Math.ceil(total / limitNum),
-    data: { reviews },
-  });
-});
-
 const flagReview = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { reason, description } = req.body;
@@ -735,13 +720,13 @@ const getTourReviews = catchAsync(async (req, res) => {
   query.skip((pageNum - 1) * limitNum).limit(limitNum);
 
   populateReviewFields(query, {
-    populateAll,
-    populateUser,
-    populateTour: "false",
-    populateResponseUser: "false",
-    populateAttachments: "false",
-    populateFlagUsers: "false",
-    populateEditHistory: "false",
+    populateAll: populateAll === "true",
+    populateUser: populateUser === "true",
+    populateTour: false,
+    populateResponseUser: false,
+    populateAttachments: false,
+    populateFlagUsers: false,
+    populateEditHistory: false,
     userFields,
   });
 
@@ -767,11 +752,12 @@ const flag = (v, fallback = false) =>
 const getMyReviews = catchAsync(async (req, res) => {
   const { page = 1, limit = 10, sort = "-createdAt", status } = req.query;
 
-  let query = Review.find({ user: req.user._id }).setOptions({
-    _skipStatusFilter: true,
-  });
+  const filter = {
+    user: req.user._id,
+    status: status || { $ne: "removed" },
+  };
 
-  if (status) query = query.where("status").equals(status);
+  let query = Review.find(filter).setOptions({ _skipStatusFilter: true });
 
   const pageNum = parseInt(page, 10);
   const limitNum = parseInt(limit, 10);
@@ -792,7 +778,7 @@ const getMyReviews = catchAsync(async (req, res) => {
   });
 
   const reviews = await query.lean();
-  const total = await Review.countDocuments({ user: req.user._id }).setOptions({
+  const total = await Review.countDocuments(filter).setOptions({
     _skipStatusFilter: true,
   });
 
@@ -835,13 +821,13 @@ const getBatchTourReviews = catchAsync(async (req, res) => {
         .limit(parseInt(limit, 10));
 
       const reviews = await populateReviewFields(query, {
-        populateAll: "false",
-        populateUser,
-        populateTour: "false",
-        populateResponseUser: "false",
-        populateAttachments: "false",
-        populateFlagUsers: "false",
-        populateEditHistory: "false",
+        populateAll: false,
+        populateUser: populateUser === "true",
+        populateTour: false,
+        populateResponseUser: false,
+        populateAttachments: false,
+        populateFlagUsers: false,
+        populateEditHistory: false,
         userFields,
       }).lean();
 
@@ -886,7 +872,7 @@ const updateMyReview = catchAsync(async (req, res, next) => {
     return next(new AppError("You have not reviewed this tour yet", 404));
   }
 
-  if (review.status === "rejected" || review.status === "flagged") {
+  if (review.status === "removed") {
     return next(new AppError("This review cannot be edited", 400));
   }
 
@@ -933,8 +919,6 @@ export {
   updateReview,
   markHelpful,
   addReviewResponse,
-  approveReview,
-  rejectReview,
   flagReview,
   getReviewStats,
   getTourReviews,
@@ -942,6 +926,5 @@ export {
   getBatchTourReviews,
   getMyReviewForTour,
   updateMyReview,
-  getModerationQueue,
-  hideReview,
+  adminGetAllReviews,
 };
