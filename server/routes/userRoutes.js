@@ -21,6 +21,7 @@ import {
   deleteMe,
   updateMyPassword,
   updateMyPhoto,
+  adminListUsers,
 } from "../controllers/userController.js";
 import {
   checkValidId,
@@ -126,5 +127,7 @@ router
     userUpdateLimiter,
     updateUserRole,
   );
+
+router.route("/admin/list").get(authorize("admin"), adminListUsers);
 
 export default router;
