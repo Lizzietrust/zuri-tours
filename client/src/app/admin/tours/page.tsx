@@ -1,143 +1,294 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useState } from "react";
-import { adminService } from "@/services/admin";
+import Link from "next/link";
+import {
+  useAdminTours,
+  useBulkTrashTours,
+  usePurgeTour,
+  useRestoreTour,
+  useTrashTour,
+} from "@/hooks/useAdmin";
+import type { AdminTour } from "@/services/admin";
+import { imageUrl } from "@/services/tours";
+import { formatCurrency } from "@/lib/utils";
+import Pagination from "@/components/ui/Pagination";
+import {
+  BTN,
+  Badge,
+  ConfirmDialog,
+  INPUT,
+  PageHeader,
+  RowsState,
+  TD,
+  TH,
+  TableCard,
+  Tabs,
+} from "@/components/admin/ui";
+
+type View = "active" | "trash" | "all";
+
+type Pending =
+  | { kind: "trash"; tour: AdminTour }
+  | { kind: "purge"; tour: AdminTour }
+  | { kind: "bulk"; ids: string[] }
+  | null;
 
 export default function AdminToursPage() {
-  const qc = useQueryClient();
+  const [view, setView] = useState<View>("active");
+  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pending, setPending] = useState<Pending>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["admin", "tours", { page }],
-    queryFn: () => adminService.getAllTours({ page, limit: 10 }),
+  const { data, isLoading, isError, refetch } = useAdminTours({
+    status: view,
+    q: search,
+    page,
+    limit: 15,
   });
+  const trash = useTrashTour();
+  const restore = useRestoreTour();
+  const purge = usePurgeTour();
+  const bulk = useBulkTrashTours();
 
-  const deleteTour = useMutation({
-    mutationFn: (id: string) => adminService.deleteTour(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "tours"] }),
-  });
+  const tours = data?.data.tours ?? [];
+  const allSelected =
+    tours.length > 0 && tours.every((t) => selected.includes(t._id));
+  const busy = trash.isPending || purge.isPending || bulk.isPending;
 
-  const tours = data?.data ?? [];
+  const toggle = (id: string) =>
+    setSelected((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
+    );
+
+  const confirm = () => {
+    if (!pending) return;
+    const done = {
+      onSuccess: () => {
+        setPending(null);
+        setSelected([]);
+      },
+    };
+
+    if (pending.kind === "trash") trash.mutate(pending.tour._id, done);
+    else if (pending.kind === "purge") purge.mutate(pending.tour._id, done);
+    else bulk.mutate(pending.ids, done);
+  };
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Tours</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {data?.total ?? 0} total tours
-          </p>
-        </div>
-        <Link
-          href="/admin/tours/new"
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+    <>
+      <PageHeader
+        title="Tours"
+        subtitle="Create, edit and manage every tour"
+        action={
+          <Link href="/admin/tours/new" className={BTN.primary}>
+            + New tour
+          </Link>
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Tabs<View>
+          value={view}
+          onChange={(v) => {
+            setView(v);
+            setPage(1);
+            setSelected([]);
+          }}
+          options={[
+            { value: "active", label: "Active" },
+            { value: "trash", label: "Trash" },
+            { value: "all", label: "All" },
+          ]}
+        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSearch(q.trim());
+            setPage(1);
+          }}
+          className="flex gap-2"
         >
-          + New tour
-        </Link>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, city, country…"
+            aria-label="Search tours"
+            className={`${INPUT} w-64`}
+          />
+          <button className={BTN.ghost}>Search</button>
+        </form>
       </div>
 
-      {isLoading && (
-        <div className="mt-6 space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-16 animate-pulse rounded-lg bg-gray-100"
-            />
+      {selected.length > 0 && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <span>{selected.length} selected</span>
+          <button
+            className={BTN.danger}
+            onClick={() => setPending({ kind: "bulk", ids: selected })}
+          >
+            Move to trash
+          </button>
+        </div>
+      )}
+
+      {isError && (
+        <div
+          role="alert"
+          className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+        >
+          Couldn&apos;t load tours.{" "}
+          <button className="font-semibold underline" onClick={() => refetch()}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      <TableCard>
+        <thead className="bg-gray-50">
+          <tr>
+            <th className={TH}>
+              <input
+                type="checkbox"
+                aria-label="Select all"
+                checked={allSelected}
+                onChange={() =>
+                  setSelected(
+                    allSelected
+                      ? []
+                      : tours.filter((t) => t.isActive).map((t) => t._id),
+                  )
+                }
+                className="accent-emerald-600"
+              />
+            </th>
+            <th className={TH}>Tour</th>
+            <th className={TH}>Price</th>
+            <th className={TH}>Rating</th>
+            <th className={TH}>Status</th>
+            <th className={`${TH} text-right`}>Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          <RowsState
+            loading={isLoading}
+            empty={!isLoading && tours.length === 0}
+            cols={6}
+            message="No tours found."
+          />
+          {tours.map((t) => (
+            <tr key={t._id} className={t.isActive ? "" : "bg-gray-50/70"}>
+              <td className={TD}>
+                {t.isActive && (
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${t.name}`}
+                    checked={selected.includes(t._id)}
+                    onChange={() => toggle(t._id)}
+                    className="accent-emerald-600"
+                  />
+                )}
+              </td>
+              <td className={TD}>
+                <div className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imageUrl(t.imageCover ?? "")}
+                    alt=""
+                    className="h-10 w-14 shrink-0 rounded-lg bg-gray-100 object-cover"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-gray-900">
+                      {t.name}
+                    </p>
+                    <p className="truncate text-xs text-gray-500">
+                      {[t.location?.city, t.location?.country]
+                        .filter(Boolean)
+                        .join(", ") || "—"}{" "}
+                      · {t.duration}d · {t.difficulty}
+                    </p>
+                  </div>
+                </div>
+              </td>
+              <td className={TD}>{formatCurrency(t.price)}</td>
+              <td className={TD}>
+                {(t.ratingsAverage ?? 0).toFixed(1)} ({t.ratingsQuantity ?? 0})
+              </td>
+              <td className={TD}>
+                <div className="flex flex-wrap gap-1">
+                  <Badge tone={t.isActive ? "green" : "red"}>
+                    {t.isActive ? "active" : "trash"}
+                  </Badge>
+                  {t.featured && <Badge tone="amber">featured</Badge>}
+                  {t.isSecret && <Badge tone="blue">secret</Badge>}
+                </div>
+              </td>
+              <td className={`${TD} text-right`}>
+                <div className="flex justify-end gap-2">
+                  {t.isActive ? (
+                    <>
+                      <Link
+                        href={`/admin/tours/${t._id}/edit`}
+                        className={BTN.ghost}
+                      >
+                        Edit
+                      </Link>
+                      <button
+                        className={BTN.danger}
+                        onClick={() => setPending({ kind: "trash", tour: t })}
+                      >
+                        Trash
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className={BTN.ok}
+                        disabled={restore.isPending}
+                        onClick={() => restore.mutate(t._id)}
+                      >
+                        Restore
+                      </button>
+                      <button
+                        className={BTN.danger}
+                        onClick={() => setPending({ kind: "purge", tour: t })}
+                      >
+                        Delete forever
+                      </button>
+                    </>
+                  )}
+                </div>
+              </td>
+            </tr>
           ))}
-        </div>
-      )}
+        </tbody>
+      </TableCard>
 
-      {!isLoading && (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Name
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Price
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Duration
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Difficulty
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {tours.map((t) => (
-                <tr key={t._id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-800">
-                    {t.name}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">${t.price}</td>
-                  <td className="px-4 py-3 text-gray-600">{t.duration} days</td>
-                  <td className="px-4 py-3 capitalize text-gray-600">
-                    {t.difficulty}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/admin/tours/${t._id}`}
-                      className="mr-3 text-sm font-medium text-emerald-700 hover:underline"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Delete tour "${t.name}"?`)) {
-                          deleteTour.mutate(t._id);
-                        }
-                      }}
-                      className="text-sm font-medium text-red-600 hover:underline"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {tours.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-10 text-center text-sm text-gray-500"
-                  >
-                    No tours found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <Pagination page={page} pages={data?.pages ?? 1} onChange={setPage} />
 
-      {data && data.pages > 1 && (
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <button
-            disabled={page === 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span className="text-gray-500">
-            Page {page} of {data.pages}
-          </span>
-          <button
-            disabled={page >= data.pages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 disabled:opacity-40"
-          >
-            Next
-          </button>
-        </div>
-      )}
-    </div>
+      <ConfirmDialog
+        open={pending !== null}
+        loading={busy}
+        title={
+          pending?.kind === "purge"
+            ? "Delete this tour forever?"
+            : pending?.kind === "bulk"
+              ? `Move ${pending.ids.length} tours to trash?`
+              : "Move this tour to trash?"
+        }
+        description={
+          pending?.kind === "purge"
+            ? "This permanently deletes the tour and its reviews. It cannot be undone."
+            : "Trashed tours disappear from the public site. You can restore them from the Trash tab."
+        }
+        confirmLabel={
+          pending?.kind === "purge" ? "Delete forever" : "Move to trash"
+        }
+        onConfirm={confirm}
+        onClose={() => !busy && setPending(null)}
+      />
+    </>
   );
 }
