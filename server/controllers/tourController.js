@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Tour from "../models/Tour.js";
 import User from "../models/User.js";
 import Review from "../models/Review.js";
@@ -15,9 +16,7 @@ import {
   aggregateDistancesToTours,
 } from "../services/geoService.js";
 import {
-  deleteOne,
   deleteMany,
-  restoreOne,
   permanentDeleteOne,
   cascadeDeleteOne,
   createOne,
@@ -179,8 +178,139 @@ async function attachUserReviewFlags(
 }
 
 /* ============================================================
-   DELETE FACTORY HANDLERS
+   DELETE / RESTORE HANDLERS
    ============================================================ */
+
+const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/* Tour's pre(find/findOne) hooks hide inactive + secret tours unless these flags are set */
+const withInactive = (query) => {
+  query._skipActiveFilter = true;
+  query._includeSecret = true;
+
+  return query;
+};
+
+const adminGetAllTours = catchAsync(async (req, res) => {
+  const { q, status = "active", sort = "-createdAt" } = req.query;
+  const filter = {};
+
+  if (status === "active") filter.isActive = true;
+  else if (status === "trash") filter.isActive = false;
+
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+
+    filter.$or = [
+      { name: rx },
+      { "location.city": rx },
+      { "location.country": rx },
+    ];
+  }
+
+  const allowedSorts = [
+    "-createdAt",
+    "createdAt",
+    "price",
+    "-price",
+    "name",
+    "-ratingsAverage",
+  ];
+  const sortBy = allowedSorts.includes(sort) ? sort : "-createdAt";
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+  const [tours, total] = await Promise.all([
+    withInactive(Tour.find(filter))
+      .sort(sortBy)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select(
+        "name slug price duration difficulty category ratingsAverage ratingsQuantity imageCover isActive featured isSecret createdAt location.city location.country",
+      )
+      .lean(),
+    Tour.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    results: tours.length,
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    data: { tours },
+  });
+});
+
+/* Replaces the factory softDeleteTour / restoreTour */
+const softDeleteTour = catchAsync(async (req, res, next) => {
+  const tour = await withInactive(Tour.findById(req.params.id)).select(
+    "isActive guides",
+  );
+
+  if (!tour) return next(new AppError("Tour not found", 404));
+  if (!tour.isActive)
+    return next(new AppError("Tour is already in trash", 400));
+
+  await Tour.updateOne({ _id: tour._id }, { isActive: false });
+  await User.updateMany(
+    { assignedTours: tour._id },
+    { $pull: { assignedTours: tour._id } },
+  );
+
+  res
+    .status(200)
+    .json({ status: "success", message: "Tour moved to trash", data: null });
+});
+
+const restoreTour = catchAsync(async (req, res, next) => {
+  const tour = await withInactive(Tour.findById(req.params.id)).select(
+    "isActive guides",
+  );
+
+  if (!tour) return next(new AppError("Tour not found", 404));
+  if (tour.isActive) return next(new AppError("Tour is not in trash", 400));
+
+  await Tour.updateOne({ _id: tour._id }, { isActive: true });
+
+  if (tour.guides?.length) {
+    await User.updateMany(
+      { _id: { $in: tour.guides } },
+      { $addToSet: { assignedTours: tour._id } },
+    );
+  }
+
+  res
+    .status(200)
+    .json({ status: "success", message: "Tour restored", data: null });
+});
+
+const bulkSoftDeleteTours = catchAsync(async (req, res, next) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((id) =>
+    mongoose.Types.ObjectId.isValid(id),
+  );
+
+  if (ids.length === 0) return next(new AppError("Provide tour ids", 400));
+  if (ids.length > 50) {
+    return next(new AppError("You can trash at most 50 tours at once", 400));
+  }
+
+  const result = await Tour.updateMany(
+    { _id: { $in: ids }, isActive: true },
+    { isActive: false },
+  );
+
+  await User.updateMany(
+    { assignedTours: { $in: ids } },
+    { $pull: { assignedTours: { $in: ids } } },
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: `${result.modifiedCount} tour(s) moved to trash`,
+    data: { modified: result.modifiedCount },
+  });
+});
 
 const deleteTour = cascadeDeleteOne(Tour, {
   modelName: "Tour",
@@ -205,33 +335,6 @@ const deleteTour = cascadeDeleteOne(Tour, {
     console.log(
       `Tour ${doc._id} deleted with ${cascadeResults.Reviews?.deletedCount || 0} reviews`,
     );
-  },
-});
-
-const softDeleteTour = deleteOne(Tour, {
-  modelName: "Tour",
-  softDelete: true,
-  idParam: "id",
-  beforeDelete: async (doc) => {
-    if (doc.guides && doc.guides.length > 0) {
-      await User.updateMany(
-        { assignedTours: doc._id },
-        { $pull: { assignedTours: doc._id } },
-      );
-    }
-  },
-});
-
-const restoreTour = restoreOne(Tour, {
-  modelName: "Tour",
-  idParam: "id",
-  afterRestore: async (doc) => {
-    if (doc.guides && doc.guides.length > 0) {
-      await User.updateMany(
-        { _id: { $in: doc.guides } },
-        { $addToSet: { assignedTours: doc._id } },
-      );
-    }
   },
 });
 
@@ -2316,8 +2419,10 @@ const getBatchDistances = catchAsync(async (req, res, next) => {
 
 export {
   deleteTour,
+  adminGetAllTours,
   softDeleteTour,
   restoreTour,
+  bulkSoftDeleteTours,
   permanentDeleteTour,
   bulkDeleteTours,
   getAllTours,
