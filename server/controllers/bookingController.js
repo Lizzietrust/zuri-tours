@@ -491,3 +491,53 @@ export const getAllBookings = catchAsync(async (req, res) => {
     data: { bookings },
   });
 });
+
+export const adminUpdateBooking = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { status, paymentStatus } = req.body;
+
+  const STATUSES = ["pending", "confirmed", "completed", "cancelled"];
+  const PAYMENTS = ["unpaid", "paid", "failed", "refunded"];
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new AppError("Invalid booking ID", 400);
+  }
+  if (!status && !paymentStatus) {
+    throw new AppError("Provide status or paymentStatus", 400);
+  }
+  if (status && !STATUSES.includes(status)) {
+    throw new AppError(`Status must be one of: ${STATUSES.join(", ")}`, 400);
+  }
+  if (paymentStatus && !PAYMENTS.includes(paymentStatus)) {
+    throw new AppError(
+      `Payment status must be one of: ${PAYMENTS.join(", ")}`,
+      400,
+    );
+  }
+
+  const booking = await Booking.findById(id);
+
+  if (!booking) throw new AppError("Booking not found", 404);
+  if (booking.status === "cancelled") {
+    throw new AppError("Cancelled bookings cannot be changed", 400);
+  }
+
+  if (status) booking.status = status;
+  if (paymentStatus) {
+    booking.paymentStatus = paymentStatus;
+    if (paymentStatus === "paid" && !booking.paidAt)
+      booking.paidAt = new Date();
+  }
+  await booking.save();
+
+  const populated = await Booking.findById(booking._id)
+    .populate({ path: "tour", select: "name slug imageCover" })
+    .populate({ path: "user", select: "name email" })
+    .lean();
+
+  res.status(200).json({
+    status: "success",
+    message: "Booking updated",
+    data: { booking: populated },
+  });
+});
