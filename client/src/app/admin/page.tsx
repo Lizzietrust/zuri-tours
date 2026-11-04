@@ -1,121 +1,148 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { adminService } from "@/services/admin";
+import { useAdminStats } from "@/hooks/useAdmin";
+import { formatCurrency, formatDate } from "@/lib/utils";
+import { Badge, PageHeader } from "@/components/admin/ui";
 
-export default function AdminDashboard() {
-  const usersQuery = useQuery({
-    queryKey: ["admin", "users", "stats"],
-    queryFn: () => adminService.getUsersWithStats(),
-  });
+function Tile({
+  icon,
+  label,
+  value,
+  href,
+  hint,
+}: {
+  icon: string;
+  label: string;
+  value: string | number;
+  href: string;
+  hint?: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+    >
+      <span aria-hidden className="text-xl">
+        {icon}
+      </span>
+      <div className="mt-2 text-2xl font-extrabold text-gray-900">{value}</div>
+      <div className="text-xs font-medium text-gray-500">{label}</div>
+      {hint && <div className="mt-1 text-xs text-amber-700">{hint}</div>}
+    </Link>
+  );
+}
 
-  const toursQuery = useQuery({
-    queryKey: ["admin", "tours", "stats"],
-    queryFn: () => adminService.getAllTours({ limit: 1 }),
-  });
-
-  const reviewsQuery = useQuery({
-    queryKey: ["admin", "reviews", "pending"],
-    queryFn: () => adminService.getAllReviews({ status: "pending", limit: 1 }),
-  });
-
-  const stats = [
-    {
-      label: "Total users",
-      value: usersQuery.data?.length ?? "—",
-      icon: "👥",
-      href: "/admin/users",
-    },
-    {
-      label: "Total tours",
-      value: toursQuery.data?.total ?? "—",
-      icon: "🧭",
-      href: "/admin/tours",
-    },
-    {
-      label: "Pending reviews",
-      value: reviewsQuery.data?.total ?? "—",
-      icon: "⭐",
-      href: "/admin/reviews",
-    },
-  ];
+export default function AdminDashboardPage() {
+  const { data: s, isLoading, isError, refetch } = useAdminStats();
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Manage your platform, users, tours, and reviews.
-      </p>
+    <>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Overview of everything on the platform"
+      />
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-3">
-        {stats.map((s) => (
-          <Link
-            key={s.label}
-            href={s.href}
-            className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:border-emerald-300 hover:shadow-md"
-          >
-            <div className="text-3xl">{s.icon}</div>
-            <p className="mt-2 text-3xl font-bold text-gray-900">{s.value}</p>
-            <p className="text-sm text-gray-500">{s.label}</p>
-          </Link>
-        ))}
-      </div>
+      {isLoading && <p className="text-sm text-gray-500">Loading…</p>}
+      {isError && (
+        <button
+          onClick={() => refetch()}
+          className="text-sm font-semibold text-emerald-700"
+        >
+          Couldn&apos;t load stats — try again
+        </button>
+      )}
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Quick actions</h2>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <Link
-              href="/admin/tours/new"
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              + New tour
-            </Link>
-            <Link
-              href="/admin/users"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              Manage users
-            </Link>
-            <Link
-              href="/admin/reviews?status=pending"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              Moderate reviews
-            </Link>
-            <Link
-              href="/admin/users?role=guide"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              View guides
-            </Link>
+      {s && (
+        <>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Tile
+              icon="🧭"
+              label="Active tours"
+              value={s.tours.active}
+              href="/admin/tours"
+              hint={s.tours.trashed ? `${s.tours.trashed} in trash` : undefined}
+            />
+            <Tile icon="👥" label="Users" value={s.users} href="/admin/users" />
+            <Tile
+              icon="🎟️"
+              label="Bookings"
+              value={s.bookings.total}
+              href="/admin/bookings"
+              hint={
+                s.bookings.byStatus.pending
+                  ? `${s.bookings.byStatus.pending} pending`
+                  : undefined
+              }
+            />
+            <Tile
+              icon="💰"
+              label="Paid revenue"
+              value={formatCurrency(s.bookings.revenue)}
+              href="/admin/bookings"
+            />
+            <Tile
+              icon="⭐"
+              label="Live reviews"
+              value={s.reviews.approved}
+              href="/admin/reviews"
+              hint={
+                s.reviews.reported
+                  ? `${s.reviews.reported} reported`
+                  : undefined
+              }
+            />
+            <Tile
+              icon="🚫"
+              label="Removed reviews"
+              value={s.reviews.removed}
+              href="/admin/reviews"
+            />
           </div>
-        </section>
 
-        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Recent users</h2>
-          <ul className="mt-4 divide-y divide-gray-100">
-            {(usersQuery.data ?? []).slice(0, 5).map((u) => (
-              <li
-                key={u._id}
-                className="flex items-center justify-between py-3 text-sm"
+          <h2 className="mt-10 mb-3 text-lg font-bold text-gray-900">
+            Recent bookings
+          </h2>
+          <div className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {s.recentBookings.length === 0 && (
+              <p className="p-6 text-sm text-gray-500">No bookings yet.</p>
+            )}
+            {s.recentBookings.map((b) => (
+              <div
+                key={b._id}
+                className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-gray-800">{u.name}</p>
-                  <p className="truncate text-gray-500">{u.email}</p>
+                  <p className="truncate font-semibold text-gray-900">
+                    {b.tour?.name ?? "Deleted tour"}
+                  </p>
+                  <p className="truncate text-xs text-gray-500">
+                    {b.user?.name ?? "Unknown"} · {formatDate(b.createdAt)}
+                  </p>
                 </div>
-                <span className="ml-2 shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs capitalize text-gray-600">
-                  {u.role}
-                </span>
-              </li>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-emerald-700">
+                    {formatCurrency(b.price)}
+                  </span>
+                  <Badge
+                    tone={
+                      b.status === "confirmed"
+                        ? "green"
+                        : b.status === "pending"
+                          ? "amber"
+                          : b.status === "cancelled"
+                            ? "red"
+                            : "gray"
+                    }
+                  >
+                    {b.status}
+                  </Badge>
+                </div>
+              </div>
             ))}
-            {!usersQuery.data?.length && (
-              <li className="py-3 text-sm text-gray-500">No users yet.</li>
-            )}
-          </ul>
-        </section>
-      </div>
-    </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
