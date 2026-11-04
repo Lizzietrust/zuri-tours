@@ -5,16 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { isValidPhoneNumber } from "react-phone-number-input";
+import { toast } from "sonner";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/services/auth";
 import { getInitials, getPhotoUrl } from "@/lib/user";
 import { PhoneField } from "@/components/forms/PhoneField";
-
-type Status = {
-  type: "idle" | "saving" | "ok" | "error";
-  message?: string;
-};
 
 type ProfileForm = {
   name: string;
@@ -57,22 +53,8 @@ const splitList = (value: string) =>
 const isImageSrc = (value?: string) =>
   !!value && (/^https?:\/\//i.test(value) || value.startsWith("/"));
 
-function StatusMessage({ status }: { status: Status }) {
-  if (!status.message) return null;
-  const isError = status.type === "error";
-  return (
-    <p
-      role={isError ? "alert" : "status"}
-      className={`rounded-xl border px-4 py-3 text-sm ${
-        isError
-          ? "border-amber-200 bg-amber-50 text-amber-800"
-          : "border-emerald-200 bg-emerald-50 text-emerald-800"
-      }`}
-    >
-      {status.message}
-    </p>
-  );
-}
+const getErrorMessage = (err: unknown, fallback: string) =>
+  (err as { message?: string })?.message || fallback;
 
 function SectionHeader({
   icon,
@@ -330,23 +312,21 @@ export default function SettingsPage() {
 
   const [profileDraft, setProfileDraft] = useState<Partial<ProfileForm>>({});
   const profileForm: ProfileForm = { ...baseProfile, ...profileDraft };
-  const [profileStatus, setProfileStatus] = useState<Status>({ type: "idle" });
+  const [profileSaving, setProfileSaving] = useState(false);
 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const [pwForm, setPwForm] = useState({
     currentPassword: "",
     password: "",
     passwordConfirm: "",
   });
-  const [pwStatus, setPwStatus] = useState<Status>({ type: "idle" });
+  const [pwSaving, setPwSaving] = useState(false);
   const [showPw, setShowPw] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -368,27 +348,23 @@ export default function SettingsPage() {
     value: ProfileForm[K],
   ) => {
     setProfileDraft((prev) => ({ ...prev, [field]: value }));
-    if (profileStatus.type !== "idle" && profileStatus.type !== "saving") {
-      setProfileStatus({ type: "idle" });
-    }
   };
 
   const updatePwField = (field: keyof typeof pwForm, value: string) => {
     setPwForm((prev) => ({ ...prev, [field]: value }));
-    if (pwStatus.type !== "idle" && pwStatus.type !== "saving") {
-      setPwStatus({ type: "idle" });
-    }
   };
 
   const handlePhotoFile = async (file: File) => {
-    setPhotoError(null);
-
     if (!file.type.startsWith("image/")) {
-      setPhotoError("Please select an image file.");
+      toast.error("Invalid file", {
+        description: "Please select an image file.",
+      });
       return;
     }
     if (file.size > MAX_PHOTO_BYTES) {
-      setPhotoError("Image is too large. Please pick a file under 2 MB.");
+      toast.error("Image too large", {
+        description: "Please pick a file under 2 MB.",
+      });
       return;
     }
 
@@ -404,27 +380,34 @@ export default function SettingsPage() {
 
       await refetch();
       queryClient.invalidateQueries({ queryKey: ["me"] });
+
+      toast.success("Photo updated", {
+        description: "Your new profile photo has been saved.",
+      });
     } catch (err) {
-      setPhotoError(
-        (err as { message?: string }).message ?? "Failed to upload photo",
-      );
+      toast.error("Photo upload failed", {
+        description: getErrorMessage(err, "Failed to upload photo"),
+      });
     } finally {
       setUploadingPhoto(false);
     }
   };
 
   const handlePhotoRemove = async () => {
-    setPhotoError(null);
     setUploadingPhoto(true);
     try {
       await authService.updateMe({ photo: DEFAULT_PHOTO });
       setProfileDraft((prev) => ({ ...prev, photo: "" }));
       await refetch();
       queryClient.invalidateQueries({ queryKey: ["me"] });
+
+      toast.success("Photo removed", {
+        description: "Your profile photo has been removed.",
+      });
     } catch (err) {
-      setPhotoError(
-        (err as { message?: string }).message ?? "Failed to remove photo",
-      );
+      toast.error("Couldn't remove photo", {
+        description: getErrorMessage(err, "Failed to remove photo"),
+      });
     } finally {
       setUploadingPhoto(false);
     }
@@ -432,35 +415,33 @@ export default function SettingsPage() {
 
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
+    if (profileSaving) return;
 
     const name = profileForm.name.trim();
     const phoneNumber = profileForm.phoneNumber.replace(/[^\d+]/g, "");
 
     if (name.length < 2 || name.length > 50) {
-      setProfileStatus({
-        type: "error",
-        message: "Name must be between 2 and 50 characters",
+      toast.error("Invalid name", {
+        description: "Name must be between 2 and 50 characters.",
       });
       return;
     }
 
     if (phoneNumber && !isValidPhoneNumber(phoneNumber)) {
-      setProfileStatus({
-        type: "error",
-        message: "Enter a valid phone number for the selected country.",
+      toast.error("Invalid phone number", {
+        description: "Enter a valid phone number for the selected country.",
       });
       return;
     }
 
     if (profileForm.dateOfBirth && profileForm.dateOfBirth > today) {
-      setProfileStatus({
-        type: "error",
-        message: "Date of birth cannot be in the future",
+      toast.error("Invalid date of birth", {
+        description: "Date of birth cannot be in the future.",
       });
       return;
     }
 
-    setProfileStatus({ type: "saving" });
+    setProfileSaving(true);
 
     try {
       await authService.updateMe({
@@ -486,76 +467,85 @@ export default function SettingsPage() {
       await refetch();
       queryClient.invalidateQueries({ queryKey: ["me"] });
       setProfileDraft({});
-      setProfileStatus({
-        type: "ok",
-        message: "Profile updated successfully",
+
+      toast.success("Profile updated", {
+        description: "Your changes have been saved.",
       });
     } catch (err) {
-      setProfileStatus({
-        type: "error",
-        message:
-          (err as { message?: string }).message ?? "Something went wrong",
+      toast.error("Couldn't update profile", {
+        description: getErrorMessage(err, "Something went wrong"),
       });
+    } finally {
+      setProfileSaving(false);
     }
   };
 
   const savePassword = async (e: FormEvent) => {
     e.preventDefault();
+    if (pwSaving) return;
 
     if (
       !pwForm.currentPassword ||
       !pwForm.password ||
       !pwForm.passwordConfirm
     ) {
-      setPwStatus({ type: "error", message: "Please fill in all fields" });
+      toast.error("Missing fields", {
+        description: "Please fill in all fields.",
+      });
       return;
     }
     if (pwForm.password.length < MIN_PASSWORD_LENGTH) {
-      setPwStatus({
-        type: "error",
-        message: `New password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+      toast.error("Password too short", {
+        description: `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       });
       return;
     }
     if (pwForm.password !== pwForm.passwordConfirm) {
-      setPwStatus({ type: "error", message: "Passwords do not match" });
+      toast.error("Passwords do not match", {
+        description: "Please make sure both new passwords are identical.",
+      });
       return;
     }
 
-    setPwStatus({ type: "saving" });
+    setPwSaving(true);
 
     try {
       await authService.updatePassword(pwForm);
-      setPwStatus({
-        type: "ok",
-        message: "Password updated. Redirecting you to log in again…",
+
+      toast.success("Password updated", {
+        description: "Redirecting you to log in again…",
       });
+
       setPwForm({ currentPassword: "", password: "", passwordConfirm: "" });
       redirectTimer.current = setTimeout(() => {
         router.push("/login");
       }, 1500);
     } catch (err) {
-      setPwStatus({
-        type: "error",
-        message:
-          (err as { message?: string }).message ?? "Something went wrong",
+      toast.error("Couldn't update password", {
+        description: getErrorMessage(err, "Something went wrong"),
       });
+    } finally {
+      setPwSaving(false);
     }
   };
 
   const deleteAccount = async () => {
     setDeleteLoading(true);
-    setDeleteError(null);
     try {
       await authService.deleteMe();
       queryClient.setQueryData(["me"], null);
       queryClient.removeQueries({ queryKey: ["me"] });
+
+      toast.success("Account deleted", {
+        description: "Your account and data have been removed.",
+      });
+
       router.push("/");
       router.refresh();
     } catch (err) {
-      setDeleteError(
-        (err as { message?: string }).message ?? "Failed to delete account",
-      );
+      toast.error("Couldn't delete account", {
+        description: getErrorMessage(err, "Failed to delete account"),
+      });
     } finally {
       setDeleteLoading(false);
     }
@@ -564,7 +554,6 @@ export default function SettingsPage() {
   const cancelDelete = () => {
     setConfirmDelete(false);
     setDeleteText("");
-    setDeleteError(null);
   };
 
   const pwMismatch =
@@ -637,15 +626,6 @@ export default function SettingsPage() {
                 </p>
               </div>
             </div>
-
-            {photoError && (
-              <p
-                role="alert"
-                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-              >
-                {photoError}
-              </p>
-            )}
 
             {/* Basics */}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -791,22 +771,17 @@ export default function SettingsPage() {
               />
             </div>
 
-            <StatusMessage status={profileStatus} />
-
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="submit"
                 disabled={
-                  profileStatus.type === "saving" ||
-                  uploadingPhoto ||
-                  !user ||
-                  !isProfileDirty
+                  profileSaving || uploadingPhoto || !user || !isProfileDirty
                 }
                 className={PRIMARY_BTN}
               >
-                {profileStatus.type === "saving" ? "Saving…" : "Save changes"}
+                {profileSaving ? "Saving…" : "Save changes"}
               </button>
-              {isProfileDirty && profileStatus.type !== "saving" && (
+              {isProfileDirty && !profileSaving && (
                 <span className="text-xs text-gray-500">
                   You have unsaved changes
                 </span>
@@ -893,14 +868,8 @@ export default function SettingsPage() {
               Show passwords
             </label>
 
-            <StatusMessage status={pwStatus} />
-
-            <button
-              type="submit"
-              disabled={pwStatus.type === "saving"}
-              className={PRIMARY_BTN}
-            >
-              {pwStatus.type === "saving" ? "Updating…" : "Update password"}
+            <button type="submit" disabled={pwSaving} className={PRIMARY_BTN}>
+              {pwSaving ? "Updating…" : "Update password"}
             </button>
           </form>
 
@@ -950,15 +919,6 @@ export default function SettingsPage() {
                     className="w-full max-w-xs rounded-xl border border-red-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:border-red-400 focus:outline-none focus:ring-4 focus:ring-red-100"
                   />
                 </div>
-
-                {deleteError && (
-                  <p
-                    role="alert"
-                    className="rounded-xl border border-red-200 bg-white px-4 py-3 text-sm text-red-700"
-                  >
-                    {deleteError}
-                  </p>
-                )}
 
                 <div className="flex flex-wrap gap-2">
                   <button
