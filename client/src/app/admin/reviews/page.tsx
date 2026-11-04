@@ -1,149 +1,286 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { adminService } from "@/services/admin";
+import Link from "next/link";
+import {
+  useAdminReviews,
+  usePurgeReview,
+  useRemoveReview,
+  useRestoreReview,
+} from "@/hooks/useAdmin";
+import type { AdminReview } from "@/services/admin";
+import { formatDate } from "@/lib/utils";
+import Pagination from "@/components/ui/Pagination";
+import {
+  BTN,
+  Badge,
+  ConfirmDialog,
+  INPUT,
+  PageHeader,
+  RowsState,
+  TD,
+  TH,
+  TableCard,
+  Tabs,
+} from "@/components/admin/ui";
 
-const STATUSES = ["all", "pending", "approved", "rejected"] as const;
+type View = "approved" | "removed" | "all";
+type Pending = { kind: "remove" | "purge"; review: AdminReview } | null;
 
 export default function AdminReviewsPage() {
-  const qc = useQueryClient();
-  const [status, setStatus] = useState<(typeof STATUSES)[number]>("pending");
+  const [view, setView] = useState<View>("approved");
+  const [reportedOnly, setReportedOnly] = useState(false);
+  const [rating, setRating] = useState("all");
+  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pending, setPending] = useState<Pending>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["admin", "reviews", { status, page }],
-    queryFn: () =>
-      adminService.getAllReviews({
-        status: status === "all" ? undefined : status,
-        page,
-        limit: 10,
-      }),
+  const { data, isLoading, isError, refetch } = useAdminReviews({
+    status: view,
+    rating,
+    q: search,
+    flagged: reportedOnly ? "true" : undefined,
+    page,
+    limit: 15,
   });
+  const remove = useRemoveReview();
+  const restore = useRestoreReview();
+  const purge = usePurgeReview();
 
-  const approve = useMutation({
-    mutationFn: (id: string) => adminService.approveReview(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "reviews"] }),
-  });
+  const reviews = data?.data.reviews ?? [];
+  const busy = remove.isPending || purge.isPending;
 
-  const reject = useMutation({
-    mutationFn: (id: string) => adminService.rejectReview(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "reviews"] }),
-  });
+  const confirm = (reason: string) => {
+    if (!pending) return;
+    const done = { onSuccess: () => setPending(null) };
 
-  const del = useMutation({
-    mutationFn: (id: string) => adminService.deleteReview(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "reviews"] }),
-  });
-
-  const reviews = data?.data ?? [];
+    if (pending.kind === "remove")
+      remove.mutate({ id: pending.review._id, reason }, done);
+    else purge.mutate(pending.review._id, done);
+  };
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900">Reviews</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Moderate user-submitted reviews.
-      </p>
+    <>
+      <PageHeader
+        title="Reviews"
+        subtitle="Reviews go live instantly. Remove the ones that break your rules; you can restore them anytime."
+      />
 
-      <div className="mt-6 flex gap-2">
-        {STATUSES.map((s) => (
-          <button
-            key={s}
-            onClick={() => {
-              setStatus(s);
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Tabs<View>
+          value={view}
+          onChange={(v) => {
+            setView(v);
+            setPage(1);
+          }}
+          options={[
+            { value: "approved", label: "Live" },
+            { value: "removed", label: "Removed" },
+            { value: "all", label: "All" },
+          ]}
+        />
+        <select
+          aria-label="Rating"
+          value={rating}
+          onChange={(e) => {
+            setRating(e.target.value);
+            setPage(1);
+          }}
+          className={INPUT}
+        >
+          <option value="all">Any rating</option>
+          {[5, 4, 3, 2, 1].map((r) => (
+            <option key={r} value={r}>
+              {r} ★
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={reportedOnly}
+            onChange={(e) => {
+              setReportedOnly(e.target.checked);
               setPage(1);
             }}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium capitalize ${
-              status === s
-                ? "bg-emerald-600 text-white"
-                : "border border-gray-300 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+            className="accent-emerald-600"
+          />
+          Reported only
+        </label>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSearch(q.trim());
+            setPage(1);
+          }}
+          className="ml-auto flex gap-2"
+        >
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search review text…"
+            aria-label="Search reviews"
+            className={`${INPUT} w-56`}
+          />
+          <button className={BTN.ghost}>Search</button>
+        </form>
       </div>
 
-      {isLoading && (
-        <div className="mt-6 space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-24 animate-pulse rounded-lg bg-gray-100"
-            />
-          ))}
+      {isError && (
+        <div
+          role="alert"
+          className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+        >
+          Couldn&apos;t load reviews.{" "}
+          <button className="font-semibold underline" onClick={() => refetch()}>
+            Retry
+          </button>
         </div>
       )}
 
-      {!isLoading && (
-        <div className="mt-6 space-y-3">
-          {reviews.map((r) => (
-            <article
-              key={r._id}
-              className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-semibold text-gray-900">
-                      {r.rating}★
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      {typeof r.user === "object" && r.user
-                        ? (r.user as { name: string }).name
-                        : "User"}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs capitalize ${
-                        r.status === "approved"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : r.status === "rejected"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-amber-100 text-amber-800"
-                      }`}
-                    >
-                      {r.status}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-gray-700">{r.review}</p>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2">
-                  {r.status !== "approved" && (
-                    <button
-                      onClick={() => approve.mutate(r._id)}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                    >
-                      Approve
-                    </button>
-                  )}
-                  {r.status !== "rejected" && (
-                    <button
-                      onClick={() => reject.mutate(r._id)}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                    >
-                      Reject
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      if (confirm("Delete this review?")) del.mutate(r._id);
-                    }}
-                    className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+      <TableCard>
+        <thead className="bg-gray-50">
+          <tr>
+            <th className={TH}>Review</th>
+            <th className={TH}>Author</th>
+            <th className={TH}>Tour</th>
+            <th className={TH}>Status</th>
+            <th className={`${TH} text-right`}>Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          <RowsState
+            loading={isLoading}
+            empty={!isLoading && reviews.length === 0}
+            cols={5}
+            message="No reviews match these filters."
+          />
+          {reviews.map((r) => {
+            const reports = r.flagReasons?.length ?? 0;
+
+            return (
+              <tr
+                key={r._id}
+                className={r.status === "removed" ? "bg-gray-50/70" : ""}
+              >
+                <td className={`${TD} max-w-sm`}>
+                  <p
+                    className="text-amber-500"
+                    aria-label={`${r.rating} out of 5`}
                   >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
+                    {"★".repeat(Math.round(r.rating))}
+                    <span className="text-gray-300">
+                      {"★".repeat(5 - Math.round(r.rating))}
+                    </span>
+                  </p>
+                  {r.title && (
+                    <p className="font-semibold text-gray-900">{r.title}</p>
+                  )}
+                  <p className="line-clamp-3 text-gray-700">{r.review}</p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    {formatDate(r.createdAt)}
+                  </p>
+                  {r.moderationNote && r.status === "removed" && (
+                    <p className="mt-1 text-xs text-rose-600">
+                      Reason: {r.moderationNote}
+                    </p>
+                  )}
+                </td>
+                <td className={TD}>
+                  <p className="font-medium">
+                    {r.user?.name ?? "Deleted user"}
+                  </p>
+                  <p className="text-xs text-gray-500">{r.user?.email}</p>
+                </td>
+                <td className={TD}>
+                  {r.tour ? (
+                    <Link
+                      href={`/tours/${r.tour.slug}`}
+                      className="font-medium text-emerald-700 hover:underline"
+                    >
+                      {r.tour.name}
+                    </Link>
+                  ) : (
+                    <span className="text-gray-400">Unavailable tour</span>
+                  )}
+                </td>
+                <td className={TD}>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge tone={r.status === "removed" ? "red" : "green"}>
+                      {r.status === "removed" ? "removed" : "live"}
+                    </Badge>
+                    {reports > 0 && (
+                      <span
+                        title={r.flagReasons?.map((f) => f.reason).join(", ")}
+                      >
+                        <Badge tone="amber">
+                          {reports} report{reports > 1 ? "s" : ""}
+                        </Badge>
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className={`${TD} text-right`}>
+                  <div className="flex justify-end gap-2">
+                    {r.status === "removed" ? (
+                      <>
+                        <button
+                          className={BTN.ok}
+                          disabled={restore.isPending}
+                          onClick={() => restore.mutate(r._id)}
+                        >
+                          Restore
+                        </button>
+                        <button
+                          className={BTN.danger}
+                          onClick={() =>
+                            setPending({ kind: "purge", review: r })
+                          }
+                        >
+                          Delete forever
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className={BTN.danger}
+                        onClick={() =>
+                          setPending({ kind: "remove", review: r })
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </TableCard>
 
-          {reviews.length === 0 && (
-            <p className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">
-              No reviews found for this filter.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
+      <Pagination page={page} pages={data?.pages ?? 1} onChange={setPage} />
+
+      <ConfirmDialog
+        open={pending !== null}
+        loading={busy}
+        withReason={pending?.kind === "remove"}
+        title={
+          pending?.kind === "purge"
+            ? "Delete this review forever?"
+            : "Remove this review?"
+        }
+        description={
+          pending?.kind === "purge"
+            ? "This can't be undone."
+            : "It will disappear from the tour page and the tour's rating will be recalculated. You can restore it later."
+        }
+        confirmLabel={
+          pending?.kind === "purge" ? "Delete forever" : "Remove review"
+        }
+        onConfirm={confirm}
+        onClose={() => !busy && setPending(null)}
+      />
+    </>
   );
 }
