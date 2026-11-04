@@ -227,6 +227,10 @@ const createUser = createOne(User, {
   },
 
   beforeCreate: async (data) => {
+    if (data.role === "admin") {
+      throw new AppError("Admins cannot be created here", 403);
+    }
+
     const existingUser = await User.findOne({ email: data.email });
 
     if (existingUser) {
@@ -311,7 +315,11 @@ const updateUserRole = updateOne(User, {
   allowedFields: ["role"],
   select: SAFE_USER_SELECT,
 
-  beforeUpdate: (data) => {
+  beforeUpdate: (data, existingDoc, req) => {
+    if (existingDoc._id.toString() === req.user._id.toString()) {
+      throw new AppError("You cannot change your own role", 403);
+    }
+
     if (!data.role) {
       throw new AppError("Please provide a role", 400);
     }
@@ -742,6 +750,52 @@ const getUserStats = catchAsync(async (req, res) => {
    ADMIN LISTS / SEARCH
    ============================================================ */
 
+const adminListUsers = catchAsync(async (req, res) => {
+  const { q, role = "all", status = "active" } = req.query;
+  const { page, limit, skip } = parsePagination(req.query, {
+    defaultLimit: 20,
+  });
+  const filter = {};
+
+  if (status === "active") filter.accountDeleted = { $ne: true };
+  else if (status === "deleted") filter.accountDeleted = true;
+
+  if (role !== "all") {
+    if (!VALID_ROLES.includes(role)) {
+      throw new AppError(
+        `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`,
+        400,
+      );
+    }
+    filter.role = role;
+  }
+
+  if (q && String(q).trim()) {
+    const rx = new RegExp(escapeRegex(String(q).trim()), "i");
+
+    filter.$or = [{ name: rx }, { email: rx }];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select("name email role photo createdAt +accountDeleted")
+      .sort("-createdAt")
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    results: users.length,
+    total,
+    page,
+    pages: Math.ceil(total / limit),
+    data: { users },
+  });
+});
+
 const getUsersWithStats = catchAsync(async (req, res) => {
   const users = await User.aggregate([
     {
@@ -1048,6 +1102,7 @@ export {
   getUserTours,
   getUserReviews,
   getUserStats,
+  adminListUsers,
   getUsersWithStats,
   searchUsers,
   bulkUpdateUsers,
