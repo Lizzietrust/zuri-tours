@@ -15,6 +15,7 @@ import userRouter from "./routes/userRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import geocodeRouter from "./routes/geocodeRoutes.js";
 import bookingRouter from "./routes/bookingRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
 
 import {
   generalLimiter,
@@ -193,6 +194,7 @@ app.use(`${API_VERSION}/reviews`, reviewRouter);
 app.use(`${API_VERSION}/users`, userRouter);
 app.use(`${API_VERSION}/geocode`, geocodeRouter);
 app.use(`${API_VERSION}/bookings`, bookingRouter);
+app.use(`${API_VERSION}/admin`, adminRouter);
 
 /* ---------- Health check ---------- */
 
