@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   useAdminTours,
@@ -34,6 +34,8 @@ type Pending =
   | { kind: "bulk"; ids: string[] }
   | null;
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 export default function AdminToursPage() {
   const [view, setView] = useState<View>("active");
   const [q, setQ] = useState("");
@@ -41,6 +43,19 @@ export default function AdminToursPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
   const [pending, setPending] = useState<Pending>(null);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term === search) return;
+
+    const timer = setTimeout(() => {
+      setSearch(term);
+      setPage(1);
+      setSelected([]);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [q, search]);
 
   const { data, isLoading, isError, refetch } = useAdminTours({
     status: view,
@@ -103,23 +118,14 @@ export default function AdminToursPage() {
             { value: "all", label: "All" },
           ]}
         />
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSearch(q.trim());
-            setPage(1);
-          }}
-          className="flex gap-2"
-        >
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, city, country…"
-            aria-label="Search tours"
-            className={`${INPUT} w-64`}
-          />
-          <button className={BTN.ghost}>Search</button>
-        </form>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name, city, country…"
+          aria-label="Search tours"
+          className={`${INPUT} w-full sm:w-72`}
+        />
       </div>
 
       {selected.length > 0 && (
