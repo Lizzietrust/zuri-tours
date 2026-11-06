@@ -899,7 +899,7 @@ const getTour = catchAsync((req, res, next) => {
    CREATE / UPDATE
    ============================================================ */
 
-const createTour = createOne(Tour, {
+const createTourFactory = createOne(Tour, {
   modelName: "Tour",
   populateOptions: [
     { path: "guides", select: "name email role profileImage bio" },
@@ -958,6 +958,22 @@ const createTour = createOne(Tour, {
       );
     }
   },
+});
+
+const createTour = catchAsync((req, res, next) => {
+  const originalJson = res.json.bind(res);
+
+  res.json = (payload) => {
+    res.json = originalJson;
+
+    if (payload?.status === "success" && !payload.message) {
+      payload.message = "Tour created successfully";
+    }
+
+    return originalJson(payload);
+  };
+
+  return createTourFactory(req, res, next);
 });
 
 const updateTour = updateOne(Tour, {
