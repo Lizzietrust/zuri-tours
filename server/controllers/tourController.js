@@ -1,4 +1,7 @@
 import mongoose from "mongoose";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import Tour from "../models/Tour.js";
 import User from "../models/User.js";
 import Review from "../models/Review.js";
@@ -191,6 +194,20 @@ const withInactive = (query) => {
   return query;
 };
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+
+const isUploadedPath = (v) =>
+  typeof v === "string" && v.startsWith("/img/tours/");
+
+const deleteUploadedCover = (relPath) => {
+  if (!isUploadedPath(relPath)) return;
+  const abs = path.join(PUBLIC_DIR, relPath.replace(/^\/+/, ""));
+
+  fs.promises.unlink(abs).catch(() => {});
+};
+
 const adminGetAllTours = catchAsync(async (req, res) => {
   const { q, status = "active", sort = "-createdAt" } = req.query;
   const filter = {};
@@ -329,6 +346,7 @@ const deleteTour = cascadeDeleteOne(Tour, {
         { $pull: { assignedTours: doc._id } },
       );
     }
+    deleteUploadedCover(doc.imageCover);
   },
 
   afterCascadeDelete: (doc, cascadeResults) => {
@@ -1001,7 +1019,7 @@ const updateTour = updateOne(Tour, {
       populate: { path: "user", select: "name email profileImage" },
     },
   ],
-  beforeUpdate: (data) => {
+  beforeUpdate: (data, req) => {
     if (data.guides) {
       if (data.guideDetails?.requirements) {
         const { minGuides, maxGuides } = data.guideDetails.requirements;
@@ -1024,6 +1042,10 @@ const updateTour = updateOne(Tour, {
           throw new AppError("Lead guide must be in the guides array", 400);
         }
       }
+    }
+
+    if (data.imageCover) {
+      req._previousCover = req.tour?._previousCover;
     }
 
     return data;
@@ -1055,6 +1077,14 @@ const updateTour = updateOne(Tour, {
           { $pull: { assignedTours: updatedDoc._id } },
         );
       }
+    }
+
+    if (
+      updatedDoc.imageCover &&
+      existingDoc.imageCover &&
+      updatedDoc.imageCover !== existingDoc.imageCover
+    ) {
+      deleteUploadedCover(existingDoc.imageCover);
     }
   },
 });
