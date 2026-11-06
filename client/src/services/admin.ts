@@ -129,11 +129,23 @@ export const adminService = {
       | Record<string, unknown>
       | undefined;
   },
-  async createTour(payload: Record<string, unknown>) {
-    return body(await api.post("/tours", payload));
+  async createTour(payload: Record<string, unknown> | FormData) {
+    const isForm =
+      typeof FormData !== "undefined" && payload instanceof FormData;
+    return body(
+      await api.post("/tours", payload, {
+        headers: isForm ? { "Content-Type": "multipart/form-data" } : undefined,
+      }),
+    );
   },
-  async updateTour(id: string, payload: Record<string, unknown>) {
-    return body(await api.patch(`/tours/${id}`, payload));
+  async updateTour(id: string, payload: Record<string, unknown> | FormData) {
+    const isForm =
+      typeof FormData !== "undefined" && payload instanceof FormData;
+    return body(
+      await api.patch(`/tours/${id}`, payload, {
+        headers: isForm ? { "Content-Type": "multipart/form-data" } : undefined,
+      }),
+    );
   },
   async trashTour(id: string) {
     return body(await api.patch(`/tours/${id}/soft-delete`));
