@@ -53,6 +53,8 @@ import {
 } from "../middleware/rateLimitMiddleware.js";
 
 import reviewRouter from "./reviewRoutes.js";
+import { uploadTourCover } from "../middleware/tourUploadMiddleware.js";
+import { normalizeTourBody } from "../middleware/normalizeTourBody.js";
 
 const router = express.Router();
 
@@ -156,6 +158,8 @@ router
     authorize("admin", "lead-guide"),
     checkValidId,
     userUpdateLimiter,
+    uploadTourCover,
+    normalizeTourBody,
     checkTourBody,
     updateTour,
   )
