@@ -53,7 +53,7 @@ export default function TourForm({
 }: {
   initial?: TourDoc;
   submitting: boolean;
-  onSubmit: (payload: Record<string, unknown>) => void;
+  onSubmit: (payload: FormData) => void;
 }) {
   const editing = !!initial;
   const [slugTouched, setSlugTouched] = useState(editing);
@@ -87,6 +87,8 @@ export default function TourForm({
         : "",
   });
 
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 
@@ -117,7 +119,8 @@ export default function TourForm({
       return fail("Enter a valid price.");
     if (Number.isFinite(discount) && discount >= price)
       return fail("Discount price must be below the regular price.");
-    if (!f.imageCover.trim()) return fail("Cover image is required.");
+    if (!coverFile && !f.imageCover.trim())
+      return fail("Cover image is required — upload a file or paste a URL.");
     if (!f.address.trim()) return fail("Address is required.");
     if (!Number.isFinite(lat) || lat < -90 || lat > 90)
       return fail("Latitude must be between -90 and 90.");
@@ -138,41 +141,38 @@ export default function TourForm({
       startDates.push(parsed.toISOString());
     }
 
-    /* keep any other location fields (region, postalCode…) when editing */
-    const {
-      lat: _lat,
-      lng: _lng,
-      _id,
-      ...existingLocation
-    } = initial?.location ?? {};
+    /* ---- build FormData (works for both upload & non-upload) ---- */
+    const fd = new FormData();
 
-    onSubmit({
-      name: f.name.trim(),
-      slug: f.slug.trim(),
-      summary: f.summary.trim(),
-      description: f.description.trim(),
-      duration,
-      maxGroupSize,
-      difficulty: f.difficulty,
-      category: f.category,
-      price,
-      priceDiscount: Number.isFinite(discount)
-        ? discount
-        : editing
-          ? null
-          : undefined,
-      imageCover: f.imageCover.trim(),
-      featured: f.featured,
-      startDates,
-      location: {
-        ...existingLocation,
-        type: "Point",
-        coordinates: [lng, lat],
-        address: f.address.trim(),
-        city: f.city.trim(),
-        country: f.country.trim(),
-      },
-    });
+    fd.append("name", f.name.trim());
+    fd.append("slug", f.slug.trim());
+    fd.append("summary", f.summary.trim());
+    fd.append("description", f.description.trim());
+    fd.append("duration", String(duration));
+    fd.append("maxGroupSize", String(maxGroupSize));
+    fd.append("difficulty", f.difficulty);
+    fd.append("category", f.category);
+    fd.append("price", String(price));
+
+    if (Number.isFinite(discount)) fd.append("priceDiscount", String(discount));
+    else if (editing) fd.append("priceDiscount", "");
+
+    fd.append("featured", String(f.featured));
+    fd.append("startDates", startDates.join(","));
+
+    fd.append("address", f.address.trim());
+    fd.append("city", f.city.trim());
+    fd.append("country", f.country.trim());
+    fd.append("lat", String(lat));
+    fd.append("lng", String(lng));
+
+    if (coverFile) {
+      fd.append("imageCover", coverFile);
+    } else {
+      fd.append("imageCover", f.imageCover.trim());
+    }
+
+    onSubmit(fd);
   };
 
   return (
@@ -284,17 +284,41 @@ export default function TourForm({
             onChange={(e) => set("priceDiscount", e.target.value)}
           />
         </Field>
+
+        {/* ---- Cover image: upload OR URL ---- */}
         <Field
           label="Cover image"
-          hint="Image URL or the filename stored on your server."
+          hint="Upload an image (max 5 MB) — or leave empty and paste a URL / stored filename below."
           className="sm:col-span-2"
         >
-          <input
-            className={`${INPUT} w-full`}
-            value={f.imageCover}
-            onChange={(e) => set("imageCover", e.target.value)}
-          />
+          <div className="flex flex-col gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              className={`${INPUT} w-full`}
+              onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+            />
+            <input
+              className={`${INPUT} w-full`}
+              value={f.imageCover}
+              disabled={!!coverFile}
+              placeholder="or paste an image URL / stored filename"
+              onChange={(e) => set("imageCover", e.target.value)}
+            />
+            {coverFile && (
+              <span className="text-xs text-emerald-700">
+                Will upload: <strong>{coverFile.name}</strong> (
+                {(coverFile.size / 1024).toFixed(1)} KB)
+              </span>
+            )}
+            {!coverFile && f.imageCover && (
+              <span className="text-xs text-gray-500">
+                Using: <strong>{f.imageCover}</strong>
+              </span>
+            )}
+          </div>
         </Field>
+
         <Field
           label="Start dates"
           hint="Comma-separated, YYYY-MM-DD. e.g. 2027-01-15, 2027-02-10"
