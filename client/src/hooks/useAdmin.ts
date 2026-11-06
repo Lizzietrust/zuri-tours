@@ -8,31 +8,45 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { adminService, type AdminUser } from "@/services/admin";
+import { getApiError, getSuccessMessage } from "@/lib/api-message";
 
 type P = Record<string, string | number | boolean | undefined>;
 
+/**
+ * Toasts the backend's own message on success/error.
+ * `success` is only a fallback for when the backend sends no message.
+ */
 function useAdminMutation<A, R>(
   fn: (args: A) => Promise<R>,
-  success: string,
+  success: string | ((args: A) => string),
   keys: string[][],
 ) {
   const qc = useQueryClient();
 
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => {
-      toast.success(success);
+    onSuccess: (res, args) => {
+      const fallback = typeof success === "function" ? success(args) : success;
+
+      toast.success(getSuccessMessage(res, fallback));
       keys.forEach((queryKey) => qc.invalidateQueries({ queryKey }));
     },
-    onError: (err) =>
-      toast.error("Action failed", {
-        description:
-          (err as { message?: string })?.message || "Something went wrong",
-      }),
+    onError: (err) => {
+      const { message, details } = getApiError(err);
+
+      toast.error(message, {
+        description: details.length ? details.join(" • ") : undefined,
+      });
+    },
   });
 }
 
-const TOURS = [["admin", "tours"], ["tours"], ["admin", "stats"]];
+const TOURS = [
+  ["admin", "tours"],
+  ["admin", "tour"],
+  ["tours"],
+  ["admin", "stats"],
+];
 const REVIEWS = [
   ["admin", "reviews"],
   ["reviews"],
@@ -114,7 +128,7 @@ export const useSaveTour = () =>
       a.id
         ? adminService.updateTour(a.id, a.payload)
         : adminService.createTour(a.payload),
-    "Tour saved",
+    (a) => (a.id ? "Tour updated successfully" : "Tour created successfully"),
     TOURS,
   );
 
