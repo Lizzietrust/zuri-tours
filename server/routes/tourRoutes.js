@@ -55,6 +55,7 @@ import {
 import reviewRouter from "./reviewRoutes.js";
 import { uploadTourCover } from "../middleware/tourUploadMiddleware.js";
 import { normalizeTourBody } from "../middleware/normalizeTourBody.js";
+import { sanitizeData } from "../middleware/sanitizeMiddleware.js";
 
 const router = express.Router();
 
@@ -130,6 +131,9 @@ router
     protect,
     authorize("admin", "lead-guide"),
     tourCreationLimiter,
+    uploadTourCover,
+    normalizeTourBody,
+    sanitizeData,
     checkTourBody,
     createTour,
   );
