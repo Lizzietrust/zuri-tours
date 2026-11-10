@@ -28,8 +28,9 @@ export const imageUrl = (filename?: string | null): string => {
   }
 
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-
   if (/^(data:|blob:)/i.test(trimmed)) return trimmed;
+
+  if (trimmed.startsWith("/img/")) return `${API_ORIGIN}${trimmed}`;
 
   if (trimmed.startsWith("/")) return trimmed;
 
