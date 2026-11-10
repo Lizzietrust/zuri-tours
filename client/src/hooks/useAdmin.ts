@@ -124,7 +124,7 @@ export const useBulkTrashTours = () =>
   );
 export const useSaveTour = () =>
   useAdminMutation(
-    (a: { id?: string; payload: Record<string, unknown> }) =>
+    (a: { id?: string; payload: Record<string, unknown> | FormData }) =>
       a.id
         ? adminService.updateTour(a.id, a.payload)
         : adminService.createTour(a.payload),
