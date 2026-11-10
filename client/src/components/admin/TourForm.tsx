@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { BTN, INPUT } from "@/components/admin/ui";
+import { imageUrl } from "@/services/tours";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TourDoc = Record<string, any>;
+
+const MAX_COVER_MB = 5;
 
 const slugify = (s: string) =>
   s
@@ -88,12 +91,44 @@ export default function TourForm({
   });
 
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [fileKey, setFileKey] = useState(0);
+
+  const preview = useMemo(
+    () => (coverFile ? URL.createObjectURL(coverFile) : null),
+    [coverFile],
+  );
+
+  useEffect(() => {
+    if (!preview) return;
+    return () => URL.revokeObjectURL(preview);
+  }, [preview]);
 
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 
   const fail = (description: string) =>
     toast.error("Check the form", { description });
+
+  const pickFile = (file: File | null) => {
+    if (!file) return setCoverFile(null);
+
+    if (!file.type.startsWith("image/")) {
+      setFileKey((k) => k + 1);
+
+      return fail("Cover must be an image file.");
+    }
+    if (file.size > MAX_COVER_MB * 1024 * 1024) {
+      setFileKey((k) => k + 1);
+
+      return fail(`Cover image must be ${MAX_COVER_MB} MB or smaller.`);
+    }
+    setCoverFile(file);
+  };
+
+  const clearFile = () => {
+    setCoverFile(null);
+    setFileKey((k) => k + 1);
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -141,7 +176,6 @@ export default function TourForm({
       startDates.push(parsed.toISOString());
     }
 
-    /* ---- build FormData (works for both upload & non-upload) ---- */
     const fd = new FormData();
 
     fd.append("name", f.name.trim());
@@ -166,14 +200,20 @@ export default function TourForm({
     fd.append("lat", String(lat));
     fd.append("lng", String(lng));
 
-    if (coverFile) {
-      fd.append("imageCover", coverFile);
-    } else {
-      fd.append("imageCover", f.imageCover.trim());
-    }
+    /* file wins; otherwise send the typed URL / existing stored path */
+    if (coverFile) fd.append("imageCover", coverFile);
+    else fd.append("imageCover", f.imageCover.trim());
 
     onSubmit(fd);
   };
+
+  const currentCover =
+    !coverFile && f.imageCover.trim()
+      ? /^https?:\/\//i.test(f.imageCover.trim())
+        ? f.imageCover.trim()
+        : imageUrl(f.imageCover.trim())
+      : null;
+  const shownPreview = preview ?? currentCover;
 
   return (
     <form
@@ -288,16 +328,28 @@ export default function TourForm({
         {/* ---- Cover image: upload OR URL ---- */}
         <Field
           label="Cover image"
-          hint="Upload an image (max 5 MB) — or leave empty and paste a URL / stored filename below."
+          hint={`Upload an image (max ${MAX_COVER_MB} MB) — or leave empty and paste a URL below. An uploaded file takes priority.`}
           className="sm:col-span-2"
         >
           <div className="flex flex-col gap-2">
-            <input
-              type="file"
-              accept="image/*"
-              className={`${INPUT} w-full`}
-              onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                key={fileKey}
+                type="file"
+                accept="image/*"
+                className={`${INPUT} w-full`}
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+              />
+              {coverFile && (
+                <button
+                  type="button"
+                  onClick={clearFile}
+                  className="shrink-0 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
             <input
               className={`${INPUT} w-full`}
               value={f.imageCover}
@@ -311,10 +363,13 @@ export default function TourForm({
                 {(coverFile.size / 1024).toFixed(1)} KB)
               </span>
             )}
-            {!coverFile && f.imageCover && (
-              <span className="text-xs text-gray-500">
-                Using: <strong>{f.imageCover}</strong>
-              </span>
+            {shownPreview && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={shownPreview}
+                alt="Cover preview"
+                className="mt-1 h-44 w-full rounded-xl border border-gray-200 object-cover sm:w-80"
+              />
             )}
           </div>
         </Field>
