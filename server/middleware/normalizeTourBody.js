@@ -1,17 +1,8 @@
-import { AppError } from "../utils/appError.js";
-
-/**
- * When the request is multipart/form-data (because a cover image was uploaded),
- * every field arrives as a string. This rebuilds the JSON shape the rest of
- * the stack expects. For plain JSON requests it's a no-op.
- */
 export const normalizeTourBody = (req, _res, next) => {
   if (!req.is("multipart/form-data")) return next();
 
-  const body = req.body || {};
-  const out = { ...body };
+  const out = { ...(req.body || {}) };
 
-  /* ---------- numbers ---------- */
   const asNum = (v) => {
     if (v === undefined || v === null || v === "") return undefined;
     const n = Number(v);
@@ -19,13 +10,21 @@ export const normalizeTourBody = (req, _res, next) => {
     return Number.isFinite(n) ? n : undefined;
   };
 
-  for (const key of ["duration", "maxGroupSize", "price", "priceDiscount"]) {
+  /* ---------- numbers ---------- */
+  for (const key of ["duration", "maxGroupSize", "price"]) {
     if (key in out) {
       const n = asNum(out[key]);
 
       if (n === undefined) delete out[key];
       else out[key] = n;
     }
+  }
+
+  /* empty discount => clear it */
+  if ("priceDiscount" in out) {
+    const n = asNum(out.priceDiscount);
+
+    out.priceDiscount = n === undefined ? null : n;
   }
 
   /* ---------- booleans ---------- */
@@ -46,11 +45,9 @@ export const normalizeTourBody = (req, _res, next) => {
 
   /* ---------- location ---------- */
   if (
-    out.lat !== undefined ||
-    out.lng !== undefined ||
-    out.address !== undefined ||
-    out.city !== undefined ||
-    out.country !== undefined
+    ["lat", "lng", "address", "city", "country"].some(
+      (k) => out[k] !== undefined,
+    )
   ) {
     const lat = asNum(out.lat);
     const lng = asNum(out.lng);
@@ -79,28 +76,14 @@ export const normalizeTourBody = (req, _res, next) => {
       };
     }
 
-    delete out.lat;
-    delete out.lng;
-    delete out.address;
-    delete out.city;
-    delete out.country;
+    ["lat", "lng", "address", "city", "country"].forEach((k) => delete out[k]);
   }
 
   /* ---------- uploaded file → imageCover path ---------- */
-  if (req.file) {
-    out.imageCover = `/img/tours/${req.file.filename}`;
-  }
+  if (req.file) out.imageCover = `/img/tours/${req.file.filename}`;
 
-  /* ---------- strip multer's own bookkeeping ---------- */
   delete out.imageCoverFile;
-
-  if (Object.prototype.hasOwnProperty.call(out, "imageCover") && !req.file) {
-    // keep whatever the client typed (URL or filename)
-  }
 
   req.body = out;
   next();
 };
-
-/* Kept exported for symmetry / future reuse if you ever need it */
-export { AppError };
