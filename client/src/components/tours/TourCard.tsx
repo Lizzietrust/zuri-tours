@@ -1,13 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useId, type SyntheticEvent } from "react";
+import { useId, useState } from "react";
 import type { Tour } from "@/types";
 import { formatCurrency } from "@/lib/utils";
 import { imageUrl } from "@/services/tours";
 import { formatDistance } from "@/lib/geo";
 
-const FALLBACK_IMG = "/placeholder-tour.jpg";
+/* Inline SVG fallback: no network request, so it can never 404 or loop. */
+const FALLBACK_IMG = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#d1fae5"/>
+        <stop offset="1" stop-color="#ecfdf5"/>
+      </linearGradient>
+    </defs>
+    <rect width="400" height="300" fill="url(#g)"/>
+    <g fill="none" stroke="#10b981" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
+      <path d="M120 190l55-70 40 50 25-30 40 50z"/>
+      <circle cx="260" cy="110" r="14"/>
+    </g>
+  </svg>`,
+)}`;
 
 const DIFFICULTY_STYLES: Record<Tour["difficulty"], string> = {
   easy: "bg-emerald-100 text-emerald-800 ring-emerald-200",
@@ -135,17 +150,15 @@ export default function TourCard({ tour }: { tour: Tour }) {
   const hasDistance =
     typeof tour.distance === "number" && Number.isFinite(tour.distance);
 
-  /* ✅ FIX — formatDistance() takes ONE argument (km).
-     It already appends the correct unit internally. */
   const distanceLabel = hasDistance
     ? `${formatDistance(tour.distance!)} away`
     : null;
 
-  const handleImgError = (e: SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget;
-    img.onerror = null;
-    img.src = FALLBACK_IMG;
-  };
+  /* Remember which src failed. If the tour's image changes, the comparison
+     below naturally resets, and the fallback is never re-requested. */
+  const src = imageUrl(tour.imageCover);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const displaySrc = failedSrc === src ? FALLBACK_IMG : src;
 
   return (
     <Link
@@ -156,11 +169,13 @@ export default function TourCard({ tour }: { tour: Tour }) {
       <div className="relative aspect-4/3 w-full overflow-hidden bg-linear-to-br from-emerald-100 to-emerald-50">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={imageUrl(tour.imageCover)}
+          src={displaySrc}
           alt={tour.name}
           loading="lazy"
           decoding="async"
-          onError={handleImgError}
+          onError={() => {
+            if (displaySrc !== FALLBACK_IMG) setFailedSrc(src);
+          }}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
         <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/40 via-transparent to-black/10" />
@@ -184,7 +199,6 @@ export default function TourCard({ tour }: { tour: Tour }) {
             title={distanceLabel ?? undefined}
           >
             <span aria-hidden>📍</span>
-            {/* ✅ FIX — single-argument call */}
             {formatDistance(tour.distance!)}
           </span>
         )}
