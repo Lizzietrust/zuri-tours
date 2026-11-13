@@ -207,13 +207,21 @@ export default function TourForm({
     onSubmit(fd);
   };
 
-  const currentCover =
-    !coverFile && f.imageCover.trim()
-      ? /^https?:\/\//i.test(f.imageCover.trim())
-        ? f.imageCover.trim()
-        : imageUrl(f.imageCover.trim())
-      : null;
-  const shownPreview = preview ?? currentCover;
+  /*
+   * Preview rules:
+   *  - Uploaded file  -> always show the local preview.
+   *  - Editing + image field untouched -> show the tour's existing cover.
+   *  - Pasted/typed URL (creating, or changed while editing) -> no preview.
+   */
+  const trimmedCover = f.imageCover.trim();
+  const isUnchangedExisting =
+    editing && !!trimmedCover && trimmedCover === (initial?.imageCover ?? "");
+  const existingCover = isUnchangedExisting
+    ? /^https?:\/\//i.test(trimmedCover)
+      ? trimmedCover
+      : imageUrl(trimmedCover)
+    : null;
+  const shownPreview = preview ?? existingCover;
 
   return (
     <form
