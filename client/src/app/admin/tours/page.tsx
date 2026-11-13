@@ -61,7 +61,7 @@ export default function AdminToursPage() {
     status: view,
     q: search,
     page,
-    limit: 15,
+    limit: 10,
   });
   const trash = useTrashTour();
   const restore = useRestoreTour();
