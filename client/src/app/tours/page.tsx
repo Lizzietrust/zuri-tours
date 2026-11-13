@@ -18,7 +18,7 @@ import ActiveFilterChips from "@/components/tours/ActiveFilterChips";
 import Pagination from "@/components/ui/Pagination";
 import type { Tour, TourFilters as Filters, TourQueryParams } from "@/types";
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 10;
 const LOCATION_RADIUS = 100;
 
 const DEFAULT_FILTERS: Filters = {
