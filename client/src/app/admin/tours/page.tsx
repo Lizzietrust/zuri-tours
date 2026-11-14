@@ -36,8 +36,20 @@ type Pending =
 
 const SEARCH_DEBOUNCE_MS = 400;
 
+const CATEGORIES = [
+  "adventure",
+  "cultural",
+  "nature",
+  "city",
+  "beach",
+  "mountain",
+];
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export default function AdminToursPage() {
   const [view, setView] = useState<View>("active");
+  const [category, setCategory] = useState("all");
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -57,8 +69,10 @@ export default function AdminToursPage() {
     return () => clearTimeout(timer);
   }, [q, search]);
 
+  /* "all" is stripped by clean() in adminService, so it isn't sent. */
   const { data, isLoading, isError, refetch } = useAdminTours({
     status: view,
+    category,
     q: search,
     page,
     limit: 10,
@@ -118,14 +132,34 @@ export default function AdminToursPage() {
             { value: "all", label: "All" },
           ]}
         />
-        <input
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search name, city, country…"
-          aria-label="Search tours"
-          className={`${INPUT} w-full sm:w-72`}
-        />
+
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <select
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setPage(1);
+              setSelected([]);
+            }}
+            aria-label="Filter by category"
+            className={`${INPUT} w-full sm:w-44`}
+          >
+            <option value="all">All categories</option>
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {capitalize(c)}
+              </option>
+            ))}
+          </select>
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, city, country…"
+            aria-label="Search tours"
+            className={`${INPUT} w-full sm:w-72`}
+          />
+        </div>
       </div>
 
       {selected.length > 0 && (
@@ -214,6 +248,7 @@ export default function AdminToursPage() {
                         .filter(Boolean)
                         .join(", ") || "—"}{" "}
                       · {t.duration}d · {t.difficulty}
+                      {t.category ? ` · ${t.category}` : ""}
                     </p>
                   </div>
                 </div>
