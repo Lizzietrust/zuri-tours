@@ -47,6 +47,9 @@ const CATEGORIES = [
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+const publicHref = (t: AdminTour) =>
+  t.isActive && !t.isSecret ? `/tours/${t.slug}` : null;
+
 export default function AdminToursPage() {
   const [view, setView] = useState<View>("active");
   const [category, setCategory] = useState("all");
@@ -240,9 +243,21 @@ export default function AdminToursPage() {
                     className="h-10 w-14 shrink-0 rounded-lg bg-gray-100 object-cover"
                   />
                   <div className="min-w-0">
-                    <p className="truncate font-semibold text-gray-900">
-                      {t.name}
-                    </p>
+                    {publicHref(t) ? (
+                      <Link
+                        href={publicHref(t)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="View on the public site"
+                        className="block truncate font-semibold text-gray-900 hover:text-emerald-700 hover:underline"
+                      >
+                        {t.name}
+                      </Link>
+                    ) : (
+                      <p className="truncate font-semibold text-gray-900">
+                        {t.name}
+                      </p>
+                    )}
                     <p className="truncate text-xs text-gray-500">
                       {[t.location?.city, t.location?.country]
                         .filter(Boolean)
@@ -270,6 +285,16 @@ export default function AdminToursPage() {
                 <div className="flex justify-end gap-2">
                   {t.isActive ? (
                     <>
+                      {publicHref(t) && (
+                        <Link
+                          href={publicHref(t)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={BTN.ghost}
+                        >
+                          View ↗
+                        </Link>
+                      )}
                       <Link
                         href={`/admin/tours/${t._id}/edit`}
                         className={BTN.ghost}
