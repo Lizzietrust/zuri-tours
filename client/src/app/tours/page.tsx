@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useEffect,
   type FormEvent,
 } from "react";
 import Link from "next/link";
@@ -350,16 +351,40 @@ function ToursContent() {
     ? (geoQuery.data?.total ?? rawTours.length)
     : (listQuery.data?.total ?? rawTours.length);
 
-  const pages = isLocationMode
+  /* Derive the page count from total if the API omits or under-reports it. */
+  const apiPages = isLocationMode
     ? (geoQuery.data?.pages ?? 1)
     : (listQuery.data?.pages ?? 1);
+  const pages = Math.max(apiPages, Math.ceil(total / PAGE_SIZE), 1);
 
   const isLoading = activeQuery.isLoading;
   const isError = activeQuery.isError;
   const isFetching = activeQuery.isFetching;
+  const isPlaceholder = activeQuery.isPlaceholderData;
+
+  /* If the URL says ?page=5 but only 2 pages exist (e.g. after a filter
+     change), jump to the last real page instead of showing an empty list. */
+  useEffect(() => {
+    if (isLoading || isError || isPlaceholder) return;
+
+    if (page > pages) {
+      router.replace(buildUrl(filters, pages, locationQuery), {
+        scroll: false,
+      });
+    }
+  }, [
+    isLoading,
+    isError,
+    isPlaceholder,
+    page,
+    pages,
+    filters,
+    locationQuery,
+    router,
+  ]);
 
   const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, total);
+  const to = from + tours.length - 1;
 
   const errorMessage =
     (activeQuery.error as { message?: string } | null)?.message ||
