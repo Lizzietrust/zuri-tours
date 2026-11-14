@@ -358,13 +358,13 @@ export default function TourForm({
                 </button>
               )}
             </div>
-            <input
+            {/* <input
               className={`${INPUT} w-full`}
               value={f.imageCover}
               disabled={!!coverFile}
               placeholder="or paste an image URL / stored filename"
               onChange={(e) => set("imageCover", e.target.value)}
-            />
+            /> */}
             {coverFile && (
               <span className="text-xs text-emerald-700">
                 Will upload: <strong>{coverFile.name}</strong> (
