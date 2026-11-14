@@ -208,12 +208,27 @@ const deleteUploadedCover = (relPath) => {
   fs.promises.unlink(abs).catch(() => {});
 };
 
+const TOUR_CATEGORIES = [
+  "adventure",
+  "cultural",
+  "nature",
+  "city",
+  "beach",
+  "mountain",
+];
+
 const adminGetAllTours = catchAsync(async (req, res) => {
-  const { q, status = "active", sort = "-createdAt" } = req.query;
+  const { q, status = "active", sort = "-createdAt", category } = req.query;
   const filter = {};
 
   if (status === "active") filter.isActive = true;
   else if (status === "trash") filter.isActive = false;
+
+  /* Only accept a known string value. This also blocks operator
+     injection such as ?category[$ne]=x, which arrives as an object. */
+  if (typeof category === "string" && TOUR_CATEGORIES.includes(category)) {
+    filter.category = category;
+  }
 
   if (q && String(q).trim()) {
     const rx = new RegExp(escapeRegex(String(q).trim()), "i");
