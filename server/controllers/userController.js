@@ -14,7 +14,6 @@ import { AppError } from "../utils/appError.js";
 import {
   deleteOne,
   deleteMany,
-  restoreOne,
   permanentDeleteOne,
   createOne,
   updateOne,
@@ -152,16 +151,35 @@ const permanentDeleteUser = permanentDeleteOne(User, {
   },
 });
 
-const restoreUser = restoreOne(User, {
-  modelName: "User",
-  idParam: "id",
-  beforeRestore: (doc, req) => {
-    if (req.user.role !== "admin") {
-      throw new AppError("Only admins can restore users", 403);
-    }
+const restoreUser = catchAsync(async (req, res, next) => {
+  if (req.user.role !== "admin") {
+    return next(new AppError("Only admins can restore users", 403));
+  }
 
-    return doc;
-  },
+  const user = await User.findOne({ _id: req.params.id, accountDeleted: true })
+    .setOptions({ includeDeleted: true })
+    .select("name email role");
+
+  if (!user) {
+    return next(new AppError("Deactivated user not found", 404));
+  }
+
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: { accountDeleted: false, isDeleted: false },
+      $unset: { accountDeletedAt: 1, deletedAt: 1, deletedBy: 1 },
+    },
+  );
+
+  return sendSuccessResponse(res, 200, "User restored successfully", {
+    user: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+  });
 });
 
 const bulkDeleteUsers = deleteMany(User, {
@@ -757,8 +775,12 @@ const adminListUsers = catchAsync(async (req, res) => {
   });
   const filter = {};
 
-  if (status === "active") filter.accountDeleted = { $ne: true };
-  else if (status === "deleted") filter.accountDeleted = true;
+  if (status === "deleted") {
+    filter.accountDeleted = true;
+  } else if (status === "active") {
+    filter.accountDeleted = { $ne: true };
+    filter.active = { $ne: false };
+  }
 
   if (role !== "all") {
     if (!VALID_ROLES.includes(role)) {
@@ -778,6 +800,7 @@ const adminListUsers = catchAsync(async (req, res) => {
 
   const [users, total] = await Promise.all([
     User.find(filter)
+      .setOptions({ includeDeleted: true })
       .select("name email role photo createdAt +accountDeleted")
       .sort("-createdAt")
       .skip(skip)
