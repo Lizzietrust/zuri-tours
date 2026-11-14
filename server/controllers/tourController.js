@@ -24,7 +24,6 @@ import {
   cascadeDeleteOne,
   createOne,
   updateOne,
-  getAll,
   getOne,
 } from "../utils/handlerFactory.js";
 
@@ -394,217 +393,6 @@ const bulkDeleteTours = deleteMany(Tour, {
    READ FACTORY HANDLERS
    ============================================================ */
 
-const getAllToursFactory = getAll(Tour, {
-  modelName: "Tour",
-  searchFields: ["name", "summary", "description", "location"],
-  allowedFilters: [
-    "difficulty",
-    "price",
-    "ratingsAverage",
-    "duration",
-    "category",
-  ],
-  allowedSorts: ["createdAt", "price", "ratingsAverage", "duration", "name"],
-  defaultSort: { createdAt: -1 },
-  defaultLimit: 10,
-  maxLimit: 100,
-  resourceKey: "tours",
-
-  transformFilter: (filter, req) => {
-    const {
-      minPrice,
-      maxPrice,
-      minRating,
-      maxRating,
-      startDate,
-      endDate,
-      q,
-      maxDuration,
-    } = req.query;
-
-    const newFilter = { ...filter };
-
-    [
-      "q",
-      "lat",
-      "lng",
-      "radius",
-      "unit",
-      "minPrice",
-      "maxPrice",
-      "minRating",
-      "maxRating",
-      "startDate",
-      "endDate",
-      "maxDuration",
-    ].forEach((key) => delete newFilter[key]);
-
-    const toNum = (v) => {
-      const n = Number(v);
-
-      return v !== undefined && v !== "" && Number.isFinite(n) ? n : undefined;
-    };
-
-    /* ---------- Text search ---------- */
-    if (typeof q === "string" && q.trim()) {
-      const regex = new RegExp(
-        q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-        "i",
-      );
-
-      newFilter.$or = [
-        { name: regex },
-        { summary: regex },
-        { description: regex },
-        { "location.address": regex },
-        { "location.city": regex },
-        { "location.country": regex },
-      ];
-    }
-
-    /* ---------- Price ---------- */
-    const minP = toNum(minPrice);
-    const maxP = toNum(maxPrice);
-
-    if (minP !== undefined || maxP !== undefined) {
-      newFilter.price = {};
-      if (minP !== undefined) newFilter.price.$gte = minP;
-      if (maxP !== undefined) newFilter.price.$lte = maxP;
-    }
-
-    /* ---------- Rating ---------- */
-    const minR = toNum(minRating);
-    const maxR = toNum(maxRating);
-
-    if (minR !== undefined || maxR !== undefined) {
-      newFilter.ratingsAverage = {};
-      if (minR !== undefined) newFilter.ratingsAverage.$gte = minR;
-      if (maxR !== undefined) newFilter.ratingsAverage.$lte = maxR;
-    }
-
-    /* ---------- Max duration (days) ---------- */
-    const maxD = toNum(maxDuration);
-
-    if (maxD !== undefined && maxD > 0) {
-      newFilter.duration = { $lte: maxD };
-    }
-
-    /* ---------- Start dates ---------- */
-    const start = startDate ? new Date(startDate) : null;
-    const end = endDate ? new Date(endDate) : null;
-    const validStart = start && !Number.isNaN(start.getTime());
-    const validEnd = end && !Number.isNaN(end.getTime());
-
-    if (validStart || validEnd) {
-      newFilter.startDates = {};
-      if (validStart) newFilter.startDates.$gte = start;
-      if (validEnd) newFilter.startDates.$lte = end;
-    }
-
-    return newFilter;
-  },
-
-  populateOptions: (req) => {
-    const populateAll = req.query.populateAll === "true";
-    const populateGuides = req.query.populateGuides !== "false";
-    const populateLeadGuide = req.query.populateLeadGuide !== "false";
-    const populateAssistantGuides =
-      req.query.populateAssistantGuides === "true";
-    const populateGuideAssignments =
-      req.query.populateGuideAssignments === "true";
-    const populateGuideRatings = req.query.populateGuideRatings === "true";
-
-    const popOpts = [];
-
-    if (populateAll) {
-      popOpts.push({
-        path: "guides",
-        select: "name email role profileImage bio languages expertise",
-      });
-      popOpts.push({
-        path: "guideDetails.leadGuide",
-        select: "name email role profileImage bio languages expertise",
-      });
-      popOpts.push({
-        path: "guideDetails.assistantGuides",
-        select: "name email role profileImage bio languages expertise",
-      });
-      popOpts.push({
-        path: "guideDetails.guideAssignments.guideId",
-        select: "name email role profileImage",
-      });
-      popOpts.push({
-        path: "guideRatings.guideId",
-        select: "name email profileImage",
-      });
-      popOpts.push({
-        path: "itinerary.assignedGuides.guideId",
-        select: "name email role profileImage",
-      });
-    } else {
-      if (populateGuides) {
-        popOpts.push({
-          path: "guides",
-          select: "name email role profileImage bio languages expertise",
-        });
-      }
-
-      if (populateLeadGuide) {
-        popOpts.push({
-          path: "guideDetails.leadGuide",
-          select: "name email role profileImage bio languages expertise",
-        });
-      }
-
-      if (populateAssistantGuides) {
-        popOpts.push({
-          path: "guideDetails.assistantGuides",
-          select: "name email role profileImage bio languages expertise",
-        });
-      }
-
-      if (populateGuideAssignments) {
-        popOpts.push({
-          path: "guideDetails.guideAssignments.guideId",
-          select: "name email role profileImage",
-        });
-      }
-
-      if (populateGuideRatings) {
-        popOpts.push({
-          path: "guideRatings.guideId",
-          select: "name email profileImage",
-        });
-      }
-    }
-
-    const populateReviews = req.query.populateReviews !== "false";
-
-    if (populateReviews) {
-      const reviewType = req.query.reviewType || "approved";
-      const reviewLimit = parseInt(req.query.reviewLimit, 10) || 3;
-      const reviewSort = req.query.reviewSort || "-createdAt";
-
-      let virtualField = "reviews";
-
-      if (reviewType === "all") virtualField = "allReviews";
-      else if (reviewType === "recent") virtualField = "recentReviews";
-      else if (reviewType === "top") virtualField = "topReviews";
-
-      popOpts.push({
-        path: virtualField,
-        options: { limit: reviewLimit, sort: reviewSort },
-        populate: {
-          path: "user",
-          select: "name email profileImage role bio",
-        },
-      });
-    }
-
-    return popOpts;
-  },
-});
-
 /**
  * Shared: build the extra Mongo filter (difficulty, category, price)
  * used by the geo branch.
@@ -665,7 +453,184 @@ function parseGeoParams(req) {
  *   1. Enrich responses with `hasUserReviewed` per tour.
  *   2. Short-circuit to the geo pipeline when `lat`+`lng` are supplied.
  */
-const getAllTours = catchAsync(async (req, res, next) => {
+/* ============================================================
+   PUBLIC TOUR LIST (explicit, stable pagination)
+   ============================================================ */
+
+const LIST_SORT_FIELDS = [
+  "createdAt",
+  "price",
+  "ratingsAverage",
+  "duration",
+  "name",
+];
+const TOUR_DIFFICULTIES = ["easy", "medium", "difficult"];
+const GUIDE_SELECT = "name email role profileImage bio languages expertise";
+
+const toNum = (v) => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+
+  return Number.isFinite(n) ? n : undefined;
+};
+
+/* "-price" -> { price: -1, _id: -1 }. The _id tie-breaker makes the order
+   total, so skip/limit never repeats or drops a tour between pages. */
+const buildListSort = (raw) => {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  const desc = value.startsWith("-");
+  const field = desc ? value.slice(1) : value;
+
+  if (!LIST_SORT_FIELDS.includes(field)) return { createdAt: -1, _id: -1 };
+
+  const dir = desc ? -1 : 1;
+
+  return { [field]: dir, _id: dir };
+};
+
+const buildListFilter = (req) => {
+  const {
+    q,
+    difficulty,
+    category,
+    minPrice,
+    maxPrice,
+    minRating,
+    maxRating,
+    maxDuration,
+    startDate,
+    endDate,
+  } = req.query;
+
+  /* Visibility is explicit so the count always matches the rows returned. */
+  const filter = { isActive: { $ne: false }, isSecret: { $ne: true } };
+
+  if (typeof difficulty === "string" && TOUR_DIFFICULTIES.includes(difficulty))
+    filter.difficulty = difficulty;
+
+  if (typeof category === "string" && TOUR_CATEGORIES.includes(category))
+    filter.category = category;
+
+  if (typeof q === "string" && q.trim()) {
+    const rx = new RegExp(escapeRegex(q.trim()), "i");
+
+    filter.$or = [
+      { name: rx },
+      { summary: rx },
+      { description: rx },
+      { "location.address": rx },
+      { "location.city": rx },
+      { "location.country": rx },
+    ];
+  }
+
+  const minP = toNum(minPrice);
+  const maxP = toNum(maxPrice);
+
+  if (minP !== undefined || maxP !== undefined) {
+    filter.price = {};
+    if (minP !== undefined) filter.price.$gte = minP;
+    if (maxP !== undefined) filter.price.$lte = maxP;
+  }
+
+  const minR = toNum(minRating);
+  const maxR = toNum(maxRating);
+
+  if (minR !== undefined || maxR !== undefined) {
+    filter.ratingsAverage = {};
+    if (minR !== undefined) filter.ratingsAverage.$gte = minR;
+    if (maxR !== undefined) filter.ratingsAverage.$lte = maxR;
+  }
+
+  const maxD = toNum(maxDuration);
+
+  if (maxD !== undefined && maxD > 0) filter.duration = { $lte: maxD };
+
+  const start = typeof startDate === "string" ? new Date(startDate) : null;
+  const end = typeof endDate === "string" ? new Date(endDate) : null;
+  const validStart = start && !Number.isNaN(start.getTime());
+  const validEnd = end && !Number.isNaN(end.getTime());
+
+  if (validStart || validEnd) {
+    filter.startDates = {};
+    if (validStart) filter.startDates.$gte = start;
+    if (validEnd) filter.startDates.$lte = end;
+  }
+
+  return filter;
+};
+
+const buildListPopulate = (req) => {
+  const opts = [];
+
+  if (req.query.populateGuides !== "false") {
+    opts.push({ path: "guides", select: GUIDE_SELECT });
+  }
+
+  if (req.query.populateLeadGuide !== "false") {
+    opts.push({ path: "guideDetails.leadGuide", select: GUIDE_SELECT });
+  }
+
+  if (req.query.populateReviews !== "false") {
+    const virtualField =
+      { all: "allReviews", recent: "recentReviews", top: "topReviews" }[
+        req.query.reviewType
+      ] ?? "reviews";
+
+    opts.push({
+      path: virtualField,
+      options: {
+        limit: parseInt(req.query.reviewLimit, 10) || 3,
+        sort:
+          typeof req.query.reviewSort === "string"
+            ? req.query.reviewSort
+            : "-createdAt",
+      },
+      populate: {
+        path: "user",
+        select: "name email profileImage role bio",
+      },
+    });
+  }
+
+  return opts;
+};
+
+async function listPublicTours(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+  const filter = buildListFilter(req);
+
+  let query = Tour.find(filter)
+    .sort(buildListSort(req.query.sort))
+    .skip((page - 1) * limit)
+    .limit(limit);
+
+  buildListPopulate(req).forEach((opt) => {
+    query = query.populate(opt);
+  });
+
+  const [tours, total] = await Promise.all([
+    query.lean(),
+    Tour.countDocuments(filter),
+  ]);
+
+  return {
+    tours,
+    total,
+    page,
+    limit,
+    pages: Math.max(1, Math.ceil(total / limit)),
+  };
+}
+
+/**
+ * GET /tours
+ *   - lat + lng  -> geo pipeline
+ *   - otherwise  -> explicit, stably-sorted list above
+ * Both branches add `hasUserReviewed` for logged-in users.
+ */
+const getAllTours = catchAsync(async (req, res) => {
   /* ---------- GEO BRANCH ---------- */
   const geo = parseGeoParams(req);
 
@@ -714,32 +679,33 @@ const getAllTours = catchAsync(async (req, res, next) => {
     });
   }
 
-  /* ---------- NON-GEO BRANCH (existing factory) ---------- */
-  const originalJson = res.json.bind(res);
+  /* ---------- LIST BRANCH ---------- */
+  const {
+    total,
+    page,
+    limit,
+    pages,
+    tours: found,
+  } = await listPublicTours(req);
+  let tours = found;
 
-  res.json = async (payload) => {
+  if (req.user) {
     try {
-      if (
-        payload &&
-        payload.status === "success" &&
-        Array.isArray(payload?.data?.tours) &&
-        req.user
-      ) {
-        payload.data.tours = await attachUserReviewFlags(
-          payload.data.tours,
-          req.user._id,
-        );
-      }
+      tours = await attachUserReviewFlags(tours, req.user._id);
     } catch (err) {
       console.error("attachUserReviewFlags failed:", err.message);
     }
+  }
 
-    res.json = originalJson;
-
-    return originalJson(payload);
-  };
-
-  return getAllToursFactory(req, res, next);
+  return res.status(200).json({
+    status: "success",
+    results: tours.length,
+    total,
+    page,
+    pages,
+    limit,
+    data: { tours },
+  });
 });
 
 const getTourFactory = getOne(Tour, {
