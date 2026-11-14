@@ -101,6 +101,22 @@ const clean = (p: Params) =>
     ),
   );
 
+type TourDoc = Record<string, unknown>;
+
+/* The API may return the tour as data, data.tour or data.document. */
+const pickTour = (data: unknown): TourDoc | undefined => {
+  if (!data || typeof data !== "object") return undefined;
+
+  const d = data as Record<string, unknown>;
+
+  if (d.tour && typeof d.tour === "object") return d.tour as TourDoc;
+  if (d.document && typeof d.document === "object")
+    return d.document as TourDoc;
+  if ("_id" in d) return d as TourDoc;
+
+  return undefined;
+};
+
 export const adminService = {
   async stats() {
     const res = body<{ data: DashboardStats }>(await api.get("/admin/stats"));
@@ -114,8 +130,8 @@ export const adminService = {
       await api.get("/tours/admin/all", { params: clean(params) }),
     );
   },
-  async tour(id: string) {
-    const res = body<{ data: { tour?: AdminTour; document?: AdminTour } }>(
+  async tour(id: string): Promise<TourDoc> {
+    const res = body<{ data: unknown }>(
       await api.get(`/tours/${id}`, {
         params: {
           populateReviews: "false",
@@ -125,9 +141,11 @@ export const adminService = {
       }),
     );
 
-    return (res.data.tour ?? res.data.document) as
-      | Record<string, unknown>
-      | undefined;
+    const tour = pickTour(res.data);
+
+    if (!tour) throw new Error("Tour data missing in response");
+
+    return tour;
   },
   async createTour(payload: Record<string, unknown> | FormData) {
     const isForm =
