@@ -504,6 +504,9 @@ userSchema.pre("save", async function hashPasswordMiddleware() {
 });
 
 userSchema.pre(/^find/, function filterActiveUsersMiddleware() {
+  /* Admin queries opt out with .setOptions({ includeDeleted: true }) */
+  if (this.getOptions().includeDeleted) return;
+
   this.find({
     active: { $ne: false },
     accountDeleted: { $ne: true },
