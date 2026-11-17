@@ -236,6 +236,7 @@ export default function AdminUsersPage() {
       <ConfirmDialog
         open={pendingRole !== null}
         loading={changeRole.isPending}
+        tone="primary"
         title={`Change role to ${pendingRole?.role ?? ""}?`}
         description={roleDescription}
         confirmLabel="Change role"
@@ -261,6 +262,7 @@ export default function AdminUsersPage() {
       <ConfirmDialog
         open={restoreTarget !== null}
         loading={restore.isPending}
+        tone="primary"
         title={`Restore ${restoreTarget?.name}?`}
         description="They'll be able to log in again. Tours they were assigned to before being deactivated are not re-assigned automatically."
         confirmLabel="Restore"
