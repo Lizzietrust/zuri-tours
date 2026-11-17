@@ -61,7 +61,7 @@ export default function AdminReviewsPage() {
     q: search,
     flagged: reportedOnly ? "true" : undefined,
     page,
-    limit: 15,
+    limit: 10,
   });
   const remove = useRemoveReview();
   const restore = useRestoreReview();
