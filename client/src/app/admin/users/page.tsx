@@ -63,7 +63,7 @@ export default function AdminUsersPage() {
     role,
     q: search,
     page,
-    limit: 15,
+    limit: 10,
   });
   const changeRole = useChangeRole();
   const deactivate = useDeactivateUser();
