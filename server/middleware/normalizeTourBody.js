@@ -1,3 +1,16 @@
+/* Accepts "2027-01-23" (date only) or a full ISO string. */
+const parseDateInput = (value) => {
+  const v = String(value).trim();
+
+  if (!v) return null;
+
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(v)
+    ? new Date(`${v}T00:00:00.000Z`)
+    : new Date(v);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 export const normalizeTourBody = (req, _res, next) => {
   if (!req.is("multipart/form-data")) return next();
 
@@ -33,14 +46,19 @@ export const normalizeTourBody = (req, _res, next) => {
   }
 
   /* ---------- startDates ---------- */
-  if (typeof out.startDates === "string") {
-    out.startDates = out.startDates
-      .split(/[,\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((d) => new Date(`${d}T00:00:00.000Z`))
-      .filter((d) => !Number.isNaN(d.getTime()))
-      .map((d) => d.toISOString());
+  if ("startDates" in out) {
+    const rawDates = Array.isArray(out.startDates)
+      ? out.startDates
+      : String(out.startDates ?? "").split(/[,\n]/);
+
+    out.startDates = [
+      ...new Set(
+        rawDates
+          .map(parseDateInput)
+          .filter(Boolean)
+          .map((d) => d.toISOString()),
+      ),
+    ];
   }
 
   /* ---------- location ---------- */
