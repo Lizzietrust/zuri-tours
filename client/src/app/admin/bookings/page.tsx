@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useAdminBookings,
   useAdminCancelBooking,
@@ -21,6 +21,8 @@ import {
   TableCard,
 } from "@/components/admin/ui";
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 const statusTone = (s: string) =>
   s === "confirmed" || s === "paid"
     ? "green"
@@ -32,11 +34,28 @@ const statusTone = (s: string) =>
 
 export default function AdminBookingsPage() {
   const [status, setStatus] = useState("all");
+  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [cancelTarget, setCancelTarget] = useState<AdminBooking | null>(null);
 
+  /* Search as you type: wait for a short pause, then apply and go to page 1. */
+  useEffect(() => {
+    const term = q.trim();
+
+    if (term === search) return;
+
+    const timer = setTimeout(() => {
+      setSearch(term);
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [q, search]);
+
   const { data, isLoading, isError, refetch } = useAdminBookings({
     status,
+    q: search,
     page,
     limit: 15,
   });
@@ -52,7 +71,7 @@ export default function AdminBookingsPage() {
         subtitle="Confirm cash bookings, mark payments and handle cancellations"
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <select
           aria-label="Status"
           value={status}
@@ -68,6 +87,14 @@ export default function AdminBookingsPage() {
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search reference, customer or tour…"
+          aria-label="Search bookings"
+          className={`${INPUT} ml-auto w-full sm:w-80`}
+        />
       </div>
 
       {isError && (
@@ -98,7 +125,9 @@ export default function AdminBookingsPage() {
             loading={isLoading}
             empty={!isLoading && bookings.length === 0}
             cols={6}
-            message="No bookings found."
+            message={
+              search ? `No bookings match "${search}".` : "No bookings found."
+            }
           />
           {bookings.map((b) => {
             const open = b.status === "pending" || b.status === "confirmed";
