@@ -25,7 +25,10 @@ import {
 } from "@/components/admin/ui";
 
 type View = "approved" | "removed" | "all";
-type Pending = { kind: "remove" | "purge"; review: AdminReview } | null;
+type Pending = {
+  kind: "remove" | "purge" | "restore";
+  review: AdminReview;
+} | null;
 
 export default function AdminReviewsPage() {
   const [view, setView] = useState<View>("approved");
@@ -49,7 +52,7 @@ export default function AdminReviewsPage() {
   const purge = usePurgeReview();
 
   const reviews = data?.data.reviews ?? [];
-  const busy = remove.isPending || purge.isPending;
+  const busy = remove.isPending || purge.isPending || restore.isPending;
 
   const confirm = (reason: string) => {
     if (!pending) return;
@@ -57,7 +60,8 @@ export default function AdminReviewsPage() {
 
     if (pending.kind === "remove")
       remove.mutate({ id: pending.review._id, reason }, done);
-    else purge.mutate(pending.review._id, done);
+    else if (pending.kind === "purge") purge.mutate(pending.review._id, done);
+    else restore.mutate(pending.review._id, done);
   };
 
   return (
@@ -228,7 +232,9 @@ export default function AdminReviewsPage() {
                         <button
                           className={BTN.ok}
                           disabled={restore.isPending}
-                          onClick={() => restore.mutate(r._id)}
+                          onClick={() =>
+                            setPending({ kind: "restore", review: r })
+                          }
                         >
                           Restore
                         </button>
@@ -265,18 +271,27 @@ export default function AdminReviewsPage() {
         open={pending !== null}
         loading={busy}
         withReason={pending?.kind === "remove"}
+        tone={pending?.kind === "restore" ? "primary" : "danger"}
         title={
           pending?.kind === "purge"
             ? "Delete this review forever?"
-            : "Remove this review?"
+            : pending?.kind === "restore"
+              ? "Restore this review?"
+              : "Remove this review?"
         }
         description={
           pending?.kind === "purge"
             ? "This can't be undone."
-            : "It will disappear from the tour page and the tour's rating will be recalculated. You can restore it later."
+            : pending?.kind === "restore"
+              ? "It will become visible on the tour page again and the tour's rating will be recalculated to include it."
+              : "It will disappear from the tour page and the tour's rating will be recalculated. You can restore it later."
         }
         confirmLabel={
-          pending?.kind === "purge" ? "Delete forever" : "Remove review"
+          pending?.kind === "purge"
+            ? "Delete forever"
+            : pending?.kind === "restore"
+              ? "Restore review"
+              : "Remove review"
         }
         onConfirm={confirm}
         onClose={() => !busy && setPending(null)}
