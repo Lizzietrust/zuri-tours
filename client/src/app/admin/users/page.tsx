@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useAdminUsers,
@@ -27,6 +27,8 @@ import {
 type View = "active" | "deleted";
 const ROLES: AdminUser["role"][] = ["user", "guide", "lead-guide", "admin"];
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 export default function AdminUsersPage() {
   const { user: me } = useAuth();
   const [view, setView] = useState<View>("active");
@@ -35,6 +37,20 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [target, setTarget] = useState<AdminUser | null>(null);
+
+  /* Search as you type: wait for a short pause, then apply and go to page 1. */
+  useEffect(() => {
+    const term = q.trim();
+
+    if (term === search) return;
+
+    const timer = setTimeout(() => {
+      setSearch(term);
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [q, search]);
 
   const { data, isLoading, isError, refetch } = useAdminUsers({
     status: view,
@@ -84,23 +100,14 @@ export default function AdminUsersPage() {
             </option>
           ))}
         </select>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSearch(q.trim());
-            setPage(1);
-          }}
-          className="ml-auto flex gap-2"
-        >
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name or email…"
-            aria-label="Search users"
-            className={`${INPUT} w-56`}
-          />
-          <button className={BTN.ghost}>Search</button>
-        </form>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name or email…"
+          aria-label="Search users"
+          className={`${INPUT} ml-auto w-full sm:w-72`}
+        />
       </div>
 
       {isError && (
