@@ -57,7 +57,7 @@ export default function AdminBookingsPage() {
     status,
     q: search,
     page,
-    limit: 15,
+    limit: 10,
   });
   const update = useUpdateBooking();
   const cancel = useAdminCancelBooking();
