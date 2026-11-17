@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   useAdminReviews,
@@ -24,6 +24,8 @@ import {
   Tabs,
 } from "@/components/admin/ui";
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 type View = "approved" | "removed" | "all";
 type Pending = {
   kind: "remove" | "purge" | "restore";
@@ -38,6 +40,20 @@ export default function AdminReviewsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pending, setPending] = useState<Pending>(null);
+
+  /* Search as you type: wait for a short pause, then apply and go to page 1. */
+  useEffect(() => {
+    const term = q.trim();
+
+    if (term === search) return;
+
+    const timer = setTimeout(() => {
+      setSearch(term);
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [q, search]);
 
   const { data, isLoading, isError, refetch } = useAdminReviews({
     status: view,
@@ -112,23 +128,14 @@ export default function AdminReviewsPage() {
           />
           Reported only
         </label>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSearch(q.trim());
-            setPage(1);
-          }}
-          className="ml-auto flex gap-2"
-        >
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search review text…"
-            aria-label="Search reviews"
-            className={`${INPUT} w-56`}
-          />
-          <button className={BTN.ghost}>Search</button>
-        </form>
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search review text…"
+          aria-label="Search reviews"
+          className={`${INPUT} ml-auto w-full sm:w-56`}
+        />
       </div>
 
       {isError && (
