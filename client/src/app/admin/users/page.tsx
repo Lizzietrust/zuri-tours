@@ -25,9 +25,13 @@ import {
 } from "@/components/admin/ui";
 
 type View = "active" | "deleted";
-const ROLES: AdminUser["role"][] = ["user", "guide", "lead-guide", "admin"];
+type Role = AdminUser["role"];
+
+const ROLES: Role[] = ["user", "guide", "lead-guide", "admin"];
 
 const SEARCH_DEBOUNCE_MS = 400;
+
+type PendingRole = { user: AdminUser; role: Role } | null;
 
 export default function AdminUsersPage() {
   const { user: me } = useAuth();
@@ -37,6 +41,7 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [target, setTarget] = useState<AdminUser | null>(null);
+  const [pendingRole, setPendingRole] = useState<PendingRole>(null);
 
   /* Search as you type: wait for a short pause, then apply and go to page 1. */
   useEffect(() => {
@@ -64,6 +69,23 @@ export default function AdminUsersPage() {
   const restore = useRestoreUser();
 
   const users = data?.data.users ?? [];
+
+  const confirmRoleChange = () => {
+    if (!pendingRole) return;
+
+    changeRole.mutate(
+      { id: pendingRole.user._id, role: pendingRole.role },
+      { onSettled: () => setPendingRole(null) },
+    );
+  };
+
+  const roleDescription = pendingRole
+    ? pendingRole.role === "admin"
+      ? `${pendingRole.user.name} will get full admin access, including managing users, tours, reviews and bookings.`
+      : pendingRole.user.role === "admin"
+        ? `${pendingRole.user.name} will lose admin access and be set to ${pendingRole.role}.`
+        : `${pendingRole.user.name}'s role will change from ${pendingRole.user.role} to ${pendingRole.role}.`
+    : "";
 
   return (
     <>
@@ -155,12 +177,12 @@ export default function AdminUsersPage() {
                       aria-label={`Role for ${u.name}`}
                       value={u.role}
                       disabled={isMe || changeRole.isPending}
-                      onChange={(e) =>
-                        changeRole.mutate({
-                          id: u._id,
-                          role: e.target.value as AdminUser["role"],
-                        })
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value as Role;
+
+                        if (next !== u.role)
+                          setPendingRole({ user: u, role: next });
+                      }}
                       className={`${INPUT} py-1.5`}
                     >
                       {ROLES.map((r) => (
@@ -201,6 +223,18 @@ export default function AdminUsersPage() {
 
       <Pagination page={page} pages={data?.pages ?? 1} onChange={setPage} />
 
+      {/* Role change confirmation */}
+      <ConfirmDialog
+        open={pendingRole !== null}
+        loading={changeRole.isPending}
+        title={`Change role to ${pendingRole?.role ?? ""}?`}
+        description={roleDescription}
+        confirmLabel="Change role"
+        onConfirm={confirmRoleChange}
+        onClose={() => !changeRole.isPending && setPendingRole(null)}
+      />
+
+      {/* Deactivate confirmation */}
       <ConfirmDialog
         open={target !== null}
         loading={deactivate.isPending}
