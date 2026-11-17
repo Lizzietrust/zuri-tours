@@ -12,7 +12,6 @@ import {
 } from "../utils/responseHelper.js";
 import { AppError } from "../utils/appError.js";
 import {
-  deleteOne,
   deleteMany,
   permanentDeleteOne,
   createOne,
@@ -109,30 +108,52 @@ const assertSelfOrAdmin = (req, targetId, what) => {
    DELETE FACTORY HANDLERS
    ============================================================ */
 
-const deleteUser = deleteOne(User, {
-  modelName: "User",
-  softDelete: true,
-  idParam: "id",
-  conditions: { accountDeleted: false },
-  beforeDelete: async (doc, req) => {
-    if (doc._id.toString() === req.user._id.toString()) {
-      throw new AppError("You cannot delete your own account", 403);
-    }
+const deleteUser = catchAsync(async (req, res, next) => {
+  if (req.user.role !== "admin") {
+    return next(new AppError("Only admins can deactivate users", 403));
+  }
 
-    if (doc.role === "admin" && req.user.role !== "admin") {
-      throw new AppError("Cannot delete admin users", 403);
-    }
+  const user = await User.findOne({
+    _id: req.params.id,
+    accountDeleted: { $ne: true },
+  }).select("name email role");
 
-    if (doc.assignedTours && doc.assignedTours.length > 0) {
-      await Tour.updateMany(
-        { _id: { $in: doc.assignedTours } },
-        { $pull: { guides: doc._id } },
-      );
-    }
-  },
-  afterDelete: (doc) => {
-    console.log(`User ${doc.email} soft deleted`);
-  },
+  if (!user) {
+    return next(new AppError("User not found", 404));
+  }
+
+  if (user._id.toString() === req.user._id.toString()) {
+    return next(new AppError("You cannot delete your own account", 403));
+  }
+
+  const now = new Date();
+
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        accountDeleted: true,
+        accountDeletedAt: now,
+        isDeleted: true,
+        deletedAt: now,
+        deletedBy: req.user._id,
+      },
+    },
+  );
+
+  /* Remove them from any tours they were guiding */
+  await Tour.updateMany({ guides: user._id }, { $pull: { guides: user._id } });
+
+  console.log(`User ${user.email} soft deleted`);
+
+  return sendSuccessResponse(res, 200, "User deactivated successfully", {
+    user: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+  });
 });
 
 const permanentDeleteUser = permanentDeleteOne(User, {
