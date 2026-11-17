@@ -17,8 +17,16 @@ export default function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-6 py-8 lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
-        <aside className="mb-6 lg:mb-0">
+      <div className="mx-auto max-w-7xl px-6 py-8 lg:grid lg:grid-cols-[220px_1fr] lg:items-start lg:gap-8">
+        {/*
+          Sticky sidebar:
+          - `lg:sticky lg:top-8` pins it to the viewport as the page scrolls.
+          - `lg:h-[calc(100vh-4rem)]` matches the 2rem top/bottom padding (py-8),
+            so the nav never gets clipped under the viewport edge.
+          - `lg:overflow-y-auto` lets long nav lists scroll internally if needed.
+          - On mobile it stays a normal horizontal scroller.
+        */}
+        <aside className="mb-6 lg:sticky lg:top-8 lg:mb-0 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto">
           <p className="mb-3 hidden text-xs font-semibold uppercase tracking-wide text-gray-400 lg:block">
             Admin panel
           </p>
