@@ -41,6 +41,7 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [target, setTarget] = useState<AdminUser | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<AdminUser | null>(null);
   const [pendingRole, setPendingRole] = useState<PendingRole>(null);
 
   /* Search as you type: wait for a short pause, then apply and go to page 1. */
@@ -77,6 +78,14 @@ export default function AdminUsersPage() {
       { id: pendingRole.user._id, role: pendingRole.role },
       { onSettled: () => setPendingRole(null) },
     );
+  };
+
+  const confirmRestore = () => {
+    if (!restoreTarget) return;
+
+    restore.mutate(restoreTarget._id, {
+      onSettled: () => setRestoreTarget(null),
+    });
   };
 
   const roleDescription = pendingRole
@@ -209,7 +218,7 @@ export default function AdminUsersPage() {
                     <button
                       className={BTN.ok}
                       disabled={restore.isPending}
-                      onClick={() => restore.mutate(u._id)}
+                      onClick={() => setRestoreTarget(u)}
                     >
                       Restore
                     </button>
@@ -246,6 +255,17 @@ export default function AdminUsersPage() {
           deactivate.mutate(target._id, { onSuccess: () => setTarget(null) })
         }
         onClose={() => !deactivate.isPending && setTarget(null)}
+      />
+
+      {/* Restore confirmation */}
+      <ConfirmDialog
+        open={restoreTarget !== null}
+        loading={restore.isPending}
+        title={`Restore ${restoreTarget?.name}?`}
+        description="They'll be able to log in again. Tours they were assigned to before being deactivated are not re-assigned automatically."
+        confirmLabel="Restore"
+        onConfirm={confirmRestore}
+        onClose={() => !restore.isPending && setRestoreTarget(null)}
       />
     </>
   );
