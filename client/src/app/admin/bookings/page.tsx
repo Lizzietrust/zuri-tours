@@ -38,6 +38,9 @@ export default function AdminBookingsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [cancelTarget, setCancelTarget] = useState<AdminBooking | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<AdminBooking | null>(
+    null,
+  );
 
   /* Search as you type: wait for a short pause, then apply and go to page 1. */
   useEffect(() => {
@@ -205,9 +208,7 @@ export default function AdminBookingsPage() {
                       <button
                         className={BTN.ghost}
                         disabled={update.isPending}
-                        onClick={() =>
-                          update.mutate({ id: b._id, status: "completed" })
-                        }
+                        onClick={() => setCompleteTarget(b)}
                       >
                         Complete
                       </button>
@@ -255,6 +256,41 @@ export default function AdminBookingsPage() {
           )
         }
         onClose={() => !cancel.isPending && setCancelTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={completeTarget !== null}
+        loading={update.isPending}
+        tone="primary"
+        title="Mark this booking as completed?"
+        description={
+          <>
+            <p>
+              This marks the trip as finished for{" "}
+              <span className="font-medium text-gray-900">
+                {completeTarget?.user?.name ?? "the customer"}
+              </span>{" "}
+              on{" "}
+              <span className="font-medium text-gray-900">
+                {completeTarget ? formatDate(completeTarget.startDate) : ""}
+              </span>
+              .
+            </p>
+            <p className="mt-2">
+              Use this only after the tour has actually taken place. It
+              can&apos;t be undone from this screen.
+            </p>
+          </>
+        }
+        confirmLabel="Mark as completed"
+        onConfirm={() => {
+          if (!completeTarget) return;
+          update.mutate(
+            { id: completeTarget._id, status: "completed" },
+            { onSuccess: () => setCompleteTarget(null) },
+          );
+        }}
+        onClose={() => !update.isPending && setCompleteTarget(null)}
       />
     </>
   );
