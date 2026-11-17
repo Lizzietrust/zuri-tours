@@ -27,6 +27,16 @@ function usdToNgn(usd) {
   return Math.round(usd * NGN_RATE);
 }
 
+const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/* Tour's find hooks hide inactive and secret tours unless these flags are set */
+const withInactive = (query) => {
+  query._skipActiveFilter = true;
+  query._includeSecret = true;
+
+  return query;
+};
+
 /* ============================================================
    INITIALIZE BOOKING + PAYMENT
    ============================================================ */
@@ -461,15 +471,43 @@ export const getAllBookings = catchAsync(async (req, res) => {
     throw new AppError("Only admins can list all bookings", 403);
   }
 
-  const { page = 1, limit = 20, status, tourId } = req.query;
+  const { page = 1, limit = 20, status, tourId, q } = req.query;
 
   const filter = {};
 
-  if (status && status !== "all") filter.status = status;
-  if (tourId) filter.tour = tourId;
+  if (typeof status === "string" && status !== "all") filter.status = status;
+  if (typeof tourId === "string" && mongoose.Types.ObjectId.isValid(tourId)) {
+    filter.tour = tourId;
+  }
 
-  const pageNum = Math.max(1, parseInt(page, 10));
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
+  /* Search: reference, customer name/email, or tour name */
+  const term = typeof q === "string" ? q.trim() : "";
+
+  if (term) {
+    const rx = new RegExp(escapeRegex(term), "i");
+
+    const [users, tours] = await Promise.all([
+      User.find({ $or: [{ name: rx }, { email: rx }] })
+        .setOptions({ includeDeleted: true })
+        .select("_id")
+        .limit(200)
+        .lean(),
+      withInactive(Tour.find({ name: rx }))
+        .select("_id")
+        .limit(200)
+        .lean(),
+    ]);
+
+    filter.$or = [
+      { bookingReference: rx },
+      { paystackReference: rx },
+      { user: { $in: users.map((u) => u._id) } },
+      { tour: { $in: tours.map((t) => t._id) } },
+    ];
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
   const [bookings, total] = await Promise.all([
     Booking.find(filter)
