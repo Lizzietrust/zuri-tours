@@ -16,23 +16,23 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-6 py-8 lg:grid lg:grid-cols-[220px_1fr] lg:items-start lg:gap-8">
-        {/*
-          Sticky sidebar:
-          - `lg:sticky lg:top-8` pins it to the viewport as the page scrolls.
-          - `lg:h-[calc(100vh-4rem)]` matches the 2rem top/bottom padding (py-8),
-            so the nav never gets clipped under the viewport edge.
-          - `lg:overflow-y-auto` lets long nav lists scroll internally if needed.
-          - On mobile it stays a normal horizontal scroller.
-        */}
-        <aside className="mb-6 lg:sticky lg:top-8 lg:mb-0 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto">
+    <div className="bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start lg:gap-8">
+        <aside
+          className="
+            mb-6 lg:sticky lg:top-(--admin-sticky-top) lg:mb-0 lg:self-start
+            lg:max-h-[calc(100vh-var(--admin-sticky-top)-2rem)]
+            lg:overflow-y-auto
+            scrollbar-none
+          "
+        >
           <p className="mb-3 hidden text-xs font-semibold uppercase tracking-wide text-gray-400 lg:block">
             Admin panel
           </p>
+
           <nav
             aria-label="Admin"
-            className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible"
+            className="flex gap-2 overflow-x-auto pb-1 scrollbar-none lg:flex-col lg:overflow-visible"
           >
             {NAV.map((n) => {
               const active = n.exact
@@ -55,6 +55,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 </Link>
               );
             })}
+
             <Link
               href="/me"
               className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-800 lg:mt-4"
