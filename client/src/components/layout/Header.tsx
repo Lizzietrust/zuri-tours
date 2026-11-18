@@ -16,6 +16,8 @@ export default function Header() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  const accountHref = isAdmin ? "/me/settings" : "/me";
+
   const linkClass = (href: string) => {
     const active = pathname === href || pathname.startsWith(`${href}/`);
     return `transition hover:text-emerald-700 ${
@@ -79,7 +81,7 @@ export default function Header() {
           ) : isAuthenticated ? (
             <>
               <Link
-                href="/me"
+                href={accountHref}
                 className="hidden rounded-lg px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 sm:inline-block"
               >
                 Hi, {user!.name.split(" ")[0]}
