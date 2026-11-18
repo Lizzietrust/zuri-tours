@@ -285,7 +285,7 @@ function PhotoUpload({
 export default function SettingsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user, refetch } = useAuth();
+  const { user, refetch, isAdmin } = useAuth();
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const baseProfile = useMemo<ProfileForm>(
@@ -576,10 +576,10 @@ export default function SettingsPage() {
 
           <div className="relative mx-auto max-w-3xl px-6 py-12 sm:py-14">
             <Link
-              href="/me"
+              href={isAdmin ? "/admin" : "/me"}
               className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-800"
             >
-              ← Back to your account
+              {isAdmin ? "← Back to dashboard" : "← Back to your account"}
             </Link>
 
             <div className="mt-5 flex flex-wrap items-center gap-5">
@@ -874,73 +874,75 @@ export default function SettingsPage() {
           </form>
 
           {/* ---------- Danger zone ---------- */}
-          <div className="rounded-2xl border border-red-200 bg-red-50/70 p-6">
-            <div className="flex items-start gap-4">
-              <div
-                aria-hidden
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-100 text-xl"
-              >
-                ⚠️
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-red-800">
-                  Danger zone
-                </h2>
-                <p className="mt-0.5 text-sm text-red-700">
-                  Deleting your account is permanent. All your reviews and data
-                  will be removed.
-                </p>
-              </div>
-            </div>
-
-            {!confirmDelete ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                className="mt-5 rounded-xl border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-              >
-                Delete my account
-              </button>
-            ) : (
-              <div className="mt-5 space-y-3">
+          {!isAdmin && (
+            <div className="rounded-2xl border border-red-200 bg-red-50/70 p-6">
+              <div className="flex items-start gap-4">
+                <div
+                  aria-hidden
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-100 text-xl"
+                >
+                  ⚠️
+                </div>
                 <div>
-                  <label
-                    htmlFor="deleteConfirm"
-                    className="mb-1.5 block text-sm font-medium text-red-800"
-                  >
-                    Type <span className="font-bold">DELETE</span> to confirm
-                  </label>
-                  <input
-                    id="deleteConfirm"
-                    type="text"
-                    value={deleteText}
-                    onChange={(e) => setDeleteText(e.target.value)}
-                    autoComplete="off"
-                    className="w-full max-w-xs rounded-xl border border-red-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:border-red-400 focus:outline-none focus:ring-4 focus:ring-red-100"
-                  />
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={deleteAccount}
-                    disabled={deleteLoading || deleteText !== "DELETE"}
-                    className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
-                  >
-                    {deleteLoading ? "Deleting…" : "Yes, delete forever"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={cancelDelete}
-                    disabled={deleteLoading}
-                    className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
+                  <h2 className="text-lg font-semibold text-red-800">
+                    Danger zone
+                  </h2>
+                  <p className="mt-0.5 text-sm text-red-700">
+                    Deleting your account is permanent. All your reviews and
+                    data will be removed.
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
+
+              {!confirmDelete ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="mt-5 rounded-xl border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                >
+                  Delete my account
+                </button>
+              ) : (
+                <div className="mt-5 space-y-3">
+                  <div>
+                    <label
+                      htmlFor="deleteConfirm"
+                      className="mb-1.5 block text-sm font-medium text-red-800"
+                    >
+                      Type <span className="font-bold">DELETE</span> to confirm
+                    </label>
+                    <input
+                      id="deleteConfirm"
+                      type="text"
+                      value={deleteText}
+                      onChange={(e) => setDeleteText(e.target.value)}
+                      autoComplete="off"
+                      className="w-full max-w-xs rounded-xl border border-red-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:border-red-400 focus:outline-none focus:ring-4 focus:ring-red-100"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={deleteAccount}
+                      disabled={deleteLoading || deleteText !== "DELETE"}
+                      className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {deleteLoading ? "Deleting…" : "Yes, delete forever"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelDelete}
+                      disabled={deleteLoading}
+                      className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </ProtectedRoute>
