@@ -10,6 +10,7 @@ const NAV = [
   { href: "/admin/bookings", label: "Bookings", icon: "🎟️" },
   { href: "/admin/reviews", label: "Reviews", icon: "⭐" },
   { href: "/admin/users", label: "Users", icon: "👥" },
+  { href: "/me/settings", label: "My settings", icon: "⚙️" },
 ];
 
 export default function AdminShell({ children }: { children: ReactNode }) {
@@ -57,7 +58,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             })}
 
             <Link
-              href="/me"
+              href="/tours"
               className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-800 lg:mt-4"
             >
               ← Back to site
