@@ -92,12 +92,12 @@ export default function AdminDashboardPage() {
                   : undefined
               }
             />
-            <Tile
+            {/* <Tile
               icon="🚫"
               label="Removed reviews"
               value={s.reviews.removed}
               href="/admin/reviews"
-            />
+            /> */}
           </div>
 
           <h2 className="mt-10 mb-3 text-lg font-bold text-gray-900">
