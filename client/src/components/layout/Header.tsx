@@ -9,7 +9,7 @@ import Logo from "./Logo";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 export default function Header() {
-  const { user, isAuthenticated, isAdmin, isGuide, logout, isLoading } =
+  const { user, isAuthenticated, isAdmin, isStaffGuide, logout, isLoading } =
     useAuth();
   const pathname = usePathname();
 
@@ -57,10 +57,10 @@ export default function Header() {
             </Link>
           </li>
 
-          {isGuide && (
+          {isStaffGuide && (
             <li>
               <Link href="/guide" className={linkClass("/guide")}>
-                My Assignments
+                Guide workspace
               </Link>
             </li>
           )}
