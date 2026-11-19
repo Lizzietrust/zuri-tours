@@ -78,6 +78,27 @@ const QUICK_LINKS = [
   },
 ];
 
+const GUIDE_LINKS = [
+  {
+    href: "/guide",
+    icon: "🧭",
+    title: "Guide workspace",
+    body: "Your tours, rosters and upcoming departures.",
+  },
+  {
+    href: "/guide/availability",
+    icon: "📅",
+    title: "Availability",
+    body: "Set the days you can work.",
+  },
+  {
+    href: "/me/settings",
+    icon: "⚙️",
+    title: "Settings",
+    body: "Update your profile and change your password.",
+  },
+];
+
 const DAYS = [
   { key: "monday", label: "Mon" },
   { key: "tuesday", label: "Tue" },
@@ -213,6 +234,9 @@ export default function MePage() {
   const user = rawUser as unknown as ExtendedUser | null | undefined;
   const [copied, setCopied] = useState(false);
 
+  const isStaffGuide = user?.role === "guide" || user?.role === "lead-guide";
+  const quickLinks = isStaffGuide ? GUIDE_LINKS : QUICK_LINKS;
+
   const initials = getInitials(user?.name, user?.email);
   const photoUrl = getPhotoUrl(user?.photo);
 
@@ -238,6 +262,16 @@ export default function MePage() {
       rating > 0 ||
       totalReviews > 0 ||
       (metrics?.toursLed ?? 0) > 0);
+
+  const accountMessage = isAdmin
+    ? "You have administrator access."
+    : isStaffGuide
+      ? "Your guide account is active."
+      : "Your account is in good standing.";
+
+  const heroSubtitle = isStaffGuide
+    ? "Manage your profile, availability, and assigned tours"
+    : "Manage your profile, reviews, and preferences";
 
   const copyId = async () => {
     if (!user?._id) return;
@@ -315,7 +349,7 @@ export default function MePage() {
                         </span>
                       </span>
                     )}
-                    <span>Manage your profile, reviews, and preferences</span>
+                    <span>{heroSubtitle}</span>
                   </div>
                 </div>
               </div>
@@ -380,9 +414,7 @@ export default function MePage() {
                       Account
                     </h2>
                     <p className="mt-1 text-sm text-gray-600">
-                      {isAdmin
-                        ? "You have administrator access."
-                        : "Your account is in good standing."}
+                      {accountMessage}
                     </p>
 
                     {user._id && (
@@ -412,6 +444,13 @@ export default function MePage() {
                       className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 hover:shadow-emerald-700/30"
                     >
                       🛡️ Admin panel
+                    </Link>
+                  ) : isStaffGuide ? (
+                    <Link
+                      href="/guide"
+                      className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 hover:shadow-emerald-700/30"
+                    >
+                      🧭 Guide workspace
                     </Link>
                   ) : (
                     <Link
@@ -568,8 +607,12 @@ export default function MePage() {
               <h2 className="mt-12 text-xl font-bold text-gray-900">
                 Quick links
               </h2>
-              <div className="mt-4 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                {QUICK_LINKS.map((l) => (
+              <div
+                className={`mt-4 grid gap-6 sm:grid-cols-2 ${
+                  isStaffGuide ? "lg:grid-cols-3" : "lg:grid-cols-4"
+                }`}
+              >
+                {quickLinks.map((l) => (
                   <Link
                     key={l.href}
                     href={l.href}
