@@ -59,7 +59,7 @@ export function useAuth() {
 
   const isAuthenticated = !!user;
   const isAdmin = user?.role === "admin";
-  const isGuide = user?.role === "guide" || user?.role === "lead-guide";
+  const isStaffGuide = user?.role === "guide" || user?.role === "lead-guide";
   const isLeadGuide = user?.role === "lead-guide";
 
   return {
@@ -68,7 +68,7 @@ export function useAuth() {
     isError,
     isAuthenticated,
     isAdmin,
-    isGuide,
+    isStaffGuide,
     isLeadGuide,
     logout,
     refetch,
