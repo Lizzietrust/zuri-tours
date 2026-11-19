@@ -1,67 +1,56 @@
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { guideService } from "@/services/guides";
 import { toast } from "sonner";
-import type { Guide } from "@/types";
+import { guideService, type Availability } from "@/services/guide";
 
-/* ---------- Profile ---------- */
+const errMsg = (err: unknown, fallback: string) =>
+  (err as { message?: string })?.message || fallback;
 
-export function useGuideProfile() {
-  return useQuery({
-    queryKey: ["guide", "me"],
-    queryFn: guideService.getMe,
-    staleTime: 5 * 60 * 1000,
+export const useGuideDashboard = () =>
+  useQuery({
+    queryKey: ["guide", "dashboard"],
+    queryFn: guideService.dashboard,
   });
-}
 
-export function useUpdateGuideProfile() {
+export const useTourRoster = (tourId: string) =>
+  useQuery({
+    queryKey: ["guide", "roster", tourId],
+    queryFn: () => guideService.roster(tourId),
+    enabled: Boolean(tourId),
+  });
+
+export const useUpdateAvailability = () => {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: Partial<Guide>) => guideService.updateMe(payload),
-    onSuccess: (updated) => {
-      qc.setQueryData(["guide", "me"], updated);
+    mutationFn: (p: Partial<Availability>) =>
+      guideService.updateAvailability(p),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["guide", "dashboard"] });
       qc.invalidateQueries({ queryKey: ["me"] });
-      toast.success("Profile updated");
+      toast.success("Availability saved");
     },
-    onError: (err: unknown) => {
-      const message =
-        (err as { message?: string })?.message ?? "Failed to update profile";
-      toast.error(message);
-    },
-  });
-}
-
-/* ---------- Stats ---------- */
-
-export function useGuideStatistics() {
-  return useQuery({
-    queryKey: ["guide", "statistics"],
-    queryFn: guideService.getStatistics,
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useGuidePerformance() {
-  return useQuery({
-    queryKey: ["guide", "performance"],
-    queryFn: guideService.getPerformance,
-    staleTime: 60 * 1000,
-  });
-}
-
-/* ---------- Assigned tours ---------- */
-
-export function useAssignedTours() {
-  return useQuery({
-    queryKey: ["guide", "assigned-tours"],
-    queryFn: () =>
-      guideService.getAssignedTours({
-        populateGuides: true,
-        populateGuideDetails: true,
-        populateReviews: true,
+    onError: (err) =>
+      toast.error("Couldn't save availability", {
+        description: errMsg(err, "Something went wrong"),
       }),
-    staleTime: 60 * 1000,
   });
-}
+};
+
+export const useGuideTeam = () =>
+  useQuery({ queryKey: ["guide", "team"], queryFn: guideService.team });
+
+export const useSetTourGuide = () => {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: guideService.setTourGuide,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["guide"] });
+      toast.success("Assignment updated");
+    },
+    onError: (err) =>
+      toast.error("Couldn't update assignment", {
+        description: errMsg(err, "Something went wrong"),
+      }),
+  });
+};
