@@ -1,307 +1,294 @@
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Tour from "../models/Tour.js";
+import Booking from "../models/Booking.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/appError.js";
 
-export const getGuides = catchAsync(async (req, res) => {
-  const guides = await User.find({
-    role: { $in: ["guide", "lead-guide"] },
-    active: { $ne: false },
-    accountDeleted: { $ne: true },
-  })
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
+/* Booking statuses a guide needs to see on a roster */
+const ROSTER_STATUSES = ["confirmed", "completed"];
+
+const isLeadOrAdmin = (role) => role === "lead-guide" || role === "admin";
+
+/* Only the fields the guide workspace needs from the current user */
+const loadMe = (id) =>
+  User.findById(id)
     .select(
-      "name email photo bio experienceYears guideSpecialties languages rating totalReviews",
+      "assignedTours availability rating totalReviews performanceMetrics role",
     )
-    .populate({
-      path: "assignedTours",
-      select: "name slug duration difficulty",
-    });
+    .lean();
 
-  res.status(200).json({
-    status: "success",
-    count: guides.length,
-    data: { guides },
-  });
+/* Tour.guides and User.assignedTours can drift, so accept either link */
+const assignedTourFilter = (me) => ({
+  isActive: true,
+  $or: [{ guides: me._id }, { _id: { $in: me.assignedTours || [] } }],
 });
 
-export const getGuide = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const userId = id || req.user._id;
+const canAccessTour = async (me, tourId) => {
+  if (isLeadOrAdmin(me.role)) return true;
 
-  const guide = await User.findOne({
-    _id: userId,
-    role: { $in: ["guide", "lead-guide"] },
-    active: { $ne: false },
-    accountDeleted: { $ne: true },
-  })
-    .select(
-      "name email photo bio experienceYears guideSpecialties languages rating totalReviews certifications phoneNumber emergencyContact availability",
-    )
-    .populate({
-      path: "assignedTours",
-      select:
-        "name slug price duration difficulty ratingsAverage ratingsQuantity startDates summary imageCover maxGroupSize",
-    });
+  const hit = await Tour.exists({ _id: tourId, ...assignedTourFilter(me) });
 
-  if (!guide) {
-    throw new AppError("Guide not found", 404);
-  }
+  return Boolean(hit);
+};
 
-  const toursWithReviews = await Tour.find({ guides: guide._id }).select(
-    "ratingsQuantity ratingsAverage",
-  );
+/* ============================================================
+   GET /guide/dashboard
+   ============================================================ */
 
-  const totalReviews = toursWithReviews.reduce(
-    (sum, tour) => sum + (tour.ratingsQuantity || 0),
-    0,
-  );
+export const getGuideDashboard = catchAsync(async (req, res, next) => {
+  const me = await loadMe(req.user._id);
 
-  const avgRating =
-    toursWithReviews.length > 0
-      ? toursWithReviews.reduce(
-          (sum, tour) => sum + (tour.ratingsAverage || 0),
-          0,
-        ) / toursWithReviews.length
-      : 0;
-
-  const guideData = guide.toObject();
-
-  guideData.totalReviews = totalReviews;
-  guideData.averageRating = Math.round(avgRating * 10) / 10;
-
-  res.status(200).json({
-    status: "success",
-    data: { guide: guideData },
-  });
-});
-
-export const updateGuideProfile = catchAsync(async (req, res) => {
-  const allowedFields = [
-    "name",
-    "photo",
-    "bio",
-    "experienceYears",
-    "guideSpecialties",
-    "languages",
-    "phoneNumber",
-    "availability",
-    "emergencyContact",
-  ];
-
-  const updateData = {};
-
-  Object.keys(req.body).forEach((key) => {
-    if (allowedFields.includes(key)) {
-      updateData[key] = req.body[key];
-    }
-  });
-
-  if (req.body.specialties && !updateData.guideSpecialties) {
-    updateData.guideSpecialties = req.body.specialties;
-  }
-
-  const guide = await User.findByIdAndUpdate(req.user._id, updateData, {
-    new: true,
-    runValidators: true,
-  }).select("name email photo bio experienceYears guideSpecialties languages");
-
-  res.status(200).json({
-    status: "success",
-    data: { guide },
-  });
-});
-
-export const getGuideStatistics = catchAsync(async (req, res) => {
-  const guideId = req.user._id;
-
-  const tours = await Tour.find({
-    guides: guideId,
-    isActive: true,
-  });
-
-  const totalTours = tours.length;
+  if (!me) return next(new AppError("User not found", 404));
 
   const now = new Date();
 
-  const upcomingTours = tours.filter(
-    (tour) => tour.startDates && tour.startDates.some((date) => date >= now),
+  const tours = await Tour.find(assignedTourFilter(me))
+    .select("name slug imageCover startDates")
+    .lean();
+
+  const tourIds = tours.map((t) => t._id);
+
+  const grouped = tourIds.length
+    ? await Booking.aggregate([
+        {
+          $match: {
+            tour: { $in: tourIds },
+            status: "confirmed",
+            startDate: { $gte: now },
+          },
+        },
+        {
+          $group: {
+            _id: { tour: "$tour", startDate: "$startDate" },
+            guests: { $sum: "$guests" },
+            bookings: { $sum: 1 },
+          },
+        },
+      ])
+    : [];
+
+  const key = (tourId, date) => `${tourId}_${new Date(date).toISOString()}`;
+
+  const byDeparture = new Map(
+    grouped.map((g) => [key(g._id.tour, g._id.startDate), g]),
   );
 
-  const completedTours = tours.filter(
-    (tour) =>
-      tour.startDates &&
-      tour.startDates.length > 0 &&
-      tour.startDates.every((date) => date < now),
-  );
+  const departures = [];
+  const tourSummaries = tours.map((t) => {
+    const upcoming = (t.startDates || [])
+      .map((d) => new Date(d))
+      .filter((d) => d >= now)
+      .sort((a, b) => a - b);
 
-  const totalRevenue = tours.reduce((sum, tour) => sum + (tour.price || 0), 0);
+    let upcomingGuests = 0;
 
-  res.status(200).json({
-    status: "success",
-    data: {
-      totalTours,
-      upcomingTours: upcomingTours.length,
-      completedTours: completedTours.length,
-      totalRevenue,
-      averageRating: req.user.rating || 0,
-      totalReviews: req.user.totalReviews || 0,
-    },
-  });
-});
+    upcoming.forEach((d) => {
+      const hit = byDeparture.get(key(t._id, d));
+      const guests = hit?.guests ?? 0;
 
-export const getGuidePerformance = catchAsync(async (req, res) => {
-  const guideId = req.user._id;
-
-  const tours = await Tour.find({
-    guides: guideId,
-    isActive: true,
-  });
-
-  const totalTours = tours.length;
-  const totalRevenue = tours.reduce((sum, tour) => sum + (tour.price || 0), 0);
-
-  const avgDuration =
-    totalTours > 0
-      ? tours.reduce((sum, tour) => sum + (tour.duration || 0), 0) / totalTours
-      : 0;
-
-  const satisfactionRating =
-    req.user.performanceMetrics?.customerSatisfaction || 0;
-  const completionRate = req.user.performanceMetrics?.completionRate || 0;
-
-  res.status(200).json({
-    status: "success",
-    data: {
-      totalToursLed: totalTours,
-      totalRevenue,
-      averageTourDuration: Math.round(avgDuration),
-      customerSatisfaction: satisfactionRating,
-      completionRate,
-      rating: req.user.rating || 0,
-      totalReviews: req.user.totalReviews || 0,
-    },
-  });
-});
-
-export const getAllGuidesAdmin = catchAsync(async (req, res) => {
-  const guides = await User.find({
-    role: { $in: ["guide", "lead-guide"] },
-    active: { $ne: false },
-    accountDeleted: { $ne: true },
-  })
-    .select(
-      "name email role photo active experienceYears guideSpecialties rating totalReviews",
-    )
-    .populate({
-      path: "assignedTours",
-      select: "name slug",
+      upcomingGuests += guests;
+      departures.push({
+        tourId: t._id,
+        tourName: t.name,
+        slug: t.slug,
+        startDate: d,
+        guests,
+        bookings: hit?.bookings ?? 0,
+      });
     });
 
+    return {
+      _id: t._id,
+      name: t.name,
+      slug: t.slug,
+      imageCover: t.imageCover,
+      nextDeparture: upcoming[0] ?? null,
+      upcomingGuests,
+    };
+  });
+
+  departures.sort((a, b) => a.startDate - b.startDate);
+
   res.status(200).json({
     status: "success",
-    count: guides.length,
-    data: { guides },
+    data: {
+      stats: {
+        assignedTours: tours.length,
+        upcomingDepartures: departures.length,
+        upcomingGuests: departures.reduce((s, d) => s + d.guests, 0),
+        rating: me.rating ?? 0,
+        totalReviews: me.totalReviews ?? 0,
+      },
+      departures: departures.slice(0, 8),
+      tours: tourSummaries,
+      availability: me.availability ?? {},
+    },
   });
 });
 
-export const updateGuideStatus = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const { isActive } = req.body;
+/* ============================================================
+   GET /guide/tours/:id/roster
+   ============================================================ */
 
-  if (typeof isActive !== "boolean") {
-    throw new AppError("Please provide isActive status", 400);
+export const getTourRoster = catchAsync(async (req, res, next) => {
+  const me = await loadMe(req.user._id);
+
+  if (!me) return next(new AppError("User not found", 404));
+
+  const tour = await Tour.findOne({ _id: req.params.id, isActive: true })
+    .select("name slug startDates")
+    .lean();
+
+  if (!tour) return next(new AppError("Tour not found", 404));
+
+  if (!(await canAccessTour(me, tour._id))) {
+    return next(new AppError("You are not assigned to this tour", 403));
   }
 
-  const guide = await User.findOneAndUpdate(
-    {
-      _id: id,
+  /* No email, price or payment data: guides only need to run the trip */
+  const bookings = await Booking.find({
+    tour: tour._id,
+    status: { $in: ROSTER_STATUSES },
+  })
+    .sort("startDate")
+    .select("startDate guests status bookingReference user")
+    .populate({ path: "user", select: "name photo phoneNumber" })
+    .lean();
+
+  res.status(200).json({
+    status: "success",
+    data: { tour, bookings },
+  });
+});
+
+/* ============================================================
+   PATCH /guide/availability
+   ============================================================ */
+
+export const updateMyAvailability = catchAsync(async (req, res, next) => {
+  const clean = {};
+
+  DAYS.forEach((day) => {
+    if (typeof req.body[day] === "boolean") clean[day] = req.body[day];
+  });
+
+  if (Object.keys(clean).length === 0) {
+    return next(
+      new AppError(
+        `Send at least one of: ${DAYS.join(", ")} (true/false)`,
+        400,
+      ),
+    );
+  }
+
+  const set = {};
+
+  Object.entries(clean).forEach(([day, value]) => {
+    set[`availability.${day}`] = value;
+  });
+
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    { $set: set },
+    { new: true, runValidators: true },
+  ).select("availability");
+
+  if (!user) return next(new AppError("User not found", 404));
+
+  res.status(200).json({
+    status: "success",
+    data: { availability: user.availability },
+  });
+});
+
+/* ============================================================
+   LEAD GUIDE: GET /guide/team
+   ============================================================ */
+
+export const getTeam = catchAsync(async (_req, res) => {
+  const [guides, tours] = await Promise.all([
+    User.find({ role: { $in: ["guide", "lead-guide"] } })
+      .select("name email photo role")
+      .sort("name")
+      .lean(),
+    Tour.find({ isActive: true })
+      .select("name slug guides")
+      .sort("name")
+      .lean(),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      guides,
+      tours: tours.map((t) => ({
+        _id: t._id,
+        name: t.name,
+        slug: t.slug,
+        guides: (t.guides || []).map(String),
+      })),
+    },
+  });
+});
+
+/* ============================================================
+   LEAD GUIDE: PATCH /guide/tours/:id/guides
+   body: { guideId, action: "assign" | "unassign" }
+   ============================================================ */
+
+export const setTourGuide = catchAsync(async (req, res, next) => {
+  const { guideId, action } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(guideId)) {
+    return next(new AppError("Please provide a valid guideId", 400));
+  }
+
+  if (!["assign", "unassign"].includes(action)) {
+    return next(new AppError('action must be "assign" or "unassign"', 400));
+  }
+
+  const [tour, guide] = await Promise.all([
+    Tour.findOne({ _id: req.params.id, isActive: true }).select("_id"),
+    User.findOne({
+      _id: guideId,
       role: { $in: ["guide", "lead-guide"] },
-    },
-    { active: isActive },
-    {
-      new: true,
-      runValidators: true,
-    },
-  ).select("name email role active");
+    }).select("_id"),
+  ]);
 
-  if (!guide) {
-    throw new AppError("Guide not found", 404);
-  }
+  if (!tour) return next(new AppError("Tour not found", 404));
+  if (!guide) return next(new AppError("Guide not found", 404));
 
-  res.status(200).json({
-    status: "success",
-    message: `Guide ${isActive ? "activated" : "deactivated"} successfully`,
-    data: { guide },
-  });
-});
+  const add = action === "assign";
 
-export const assignTourToGuide = catchAsync(async (req, res) => {
-  const { id: guideId, tourId } = req.params;
-
-  const guide = await User.findOne({
-    _id: guideId,
-    role: { $in: ["guide", "lead-guide"] },
-  });
-
-  if (!guide) {
-    throw new AppError("Guide not found", 404);
-  }
-
-  const tour = await Tour.findById(tourId);
-
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
-
-  const alreadyAssigned = guide.assignedTours.some(
-    (t) => t.toString() === tourId.toString(),
-  );
-
-  if (!alreadyAssigned) {
-    guide.assignedTours.push(tourId);
-    await guide.save();
-  }
-
-  const tourHasGuide = tour.guides.some(
-    (g) => g.toString() === guideId.toString(),
-  );
-
-  if (!tourHasGuide) {
-    tour.guides.push(guideId);
-    await tour.save();
-  }
+  /* Keep both sides of the relationship in sync */
+  await Promise.all([
+    Tour.updateOne(
+      { _id: tour._id },
+      add
+        ? { $addToSet: { guides: guide._id } }
+        : { $pull: { guides: guide._id } },
+    ),
+    User.updateOne(
+      { _id: guide._id },
+      add
+        ? { $addToSet: { assignedTours: tour._id } }
+        : { $pull: { assignedTours: tour._id } },
+    ),
+  ]);
 
   res.status(200).json({
     status: "success",
-    message: "Tour assigned to guide successfully",
-  });
-});
-
-export const removeTourFromGuide = catchAsync(async (req, res) => {
-  const { id: guideId, tourId } = req.params;
-
-  const guide = await User.findById(guideId);
-
-  if (!guide) {
-    throw new AppError("Guide not found", 404);
-  }
-
-  const tour = await Tour.findById(tourId);
-
-  if (!tour) {
-    throw new AppError("Tour not found", 404);
-  }
-
-  guide.assignedTours = guide.assignedTours.filter(
-    (id) => id.toString() !== tourId,
-  );
-  await guide.save();
-
-  tour.guides = tour.guides.filter((id) => id.toString() !== guideId);
-  await tour.save();
-
-  res.status(200).json({
-    status: "success",
-    message: "Tour removed from guide successfully",
+    message: add ? "Guide assigned" : "Guide removed from tour",
   });
 });
