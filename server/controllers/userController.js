@@ -1066,20 +1066,26 @@ const deleteMe = catchAsync(async (req, res, next) => {
     return next(new AppError("User not found", 404));
   }
 
+  if (user.role === "admin") {
+    return next(
+      new AppError(
+        "Admin accounts can't be self-deleted. Ask another admin to deactivate it.",
+        403,
+      ),
+    );
+  }
+
+  const now = new Date();
+
   user.accountDeleted = true;
-  user.accountDeletedAt = new Date();
+  user.accountDeletedAt = now;
   user.isDeleted = true;
-  user.deletedAt = new Date();
+  user.deletedAt = now;
   user.deletedBy = req.user._id;
 
   await user.save({ validateBeforeSave: false });
 
-  if (user.assignedTours && user.assignedTours.length > 0) {
-    await Tour.updateMany(
-      { _id: { $in: user.assignedTours } },
-      { $pull: { guides: user._id } },
-    );
-  }
+  await Tour.updateMany({ guides: user._id }, { $pull: { guides: user._id } });
 
   return sendSuccessResponse(
     res,
