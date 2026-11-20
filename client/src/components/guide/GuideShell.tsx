@@ -8,6 +8,7 @@ type NavItem = { href: string; label: string; icon: string; exact?: boolean };
 
 const BASE_NAV: NavItem[] = [
   { href: "/guide", label: "Overview", icon: "📊", exact: true },
+  { href: "/guide/tours", label: "My tours", icon: "🗺️" },
   { href: "/guide/availability", label: "Availability", icon: "📅" },
   { href: "/me", label: "My profile", icon: "🙋", exact: true },
   { href: "/me/settings", label: "Settings", icon: "⚙️" },
@@ -26,7 +27,7 @@ export default function GuideShell({
 
   /* Team goes right after Availability for lead guides */
   const nav = isLead
-    ? [...BASE_NAV.slice(0, 2), LEAD_NAV, ...BASE_NAV.slice(2)]
+    ? [...BASE_NAV.slice(0, 3), LEAD_NAV, ...BASE_NAV.slice(3)]
     : BASE_NAV;
 
   return (
