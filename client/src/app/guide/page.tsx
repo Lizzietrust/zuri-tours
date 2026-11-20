@@ -10,19 +10,38 @@ function Tile({
   icon,
   label,
   value,
+  href,
 }: {
   icon: string;
   label: string;
   value: string | number;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+  const body = (
+    <>
       <span aria-hidden className="text-xl">
         {icon}
       </span>
       <div className="mt-2 text-2xl font-extrabold text-gray-900">{value}</div>
       <div className="text-xs font-medium text-gray-500">{label}</div>
-    </div>
+    </>
+  );
+
+  if (!href) {
+    return (
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className="block rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+    >
+      {body}
+    </Link>
   );
 }
 
@@ -54,6 +73,7 @@ export default function GuideOverviewPage() {
               icon="🗺️"
               label="Assigned tours"
               value={d.stats.assignedTours}
+              href="/guide/tours"
             />
             <Tile
               icon="📆"
@@ -102,9 +122,15 @@ export default function GuideOverviewPage() {
             ))}
           </div>
 
-          <h2 className="mt-10 mb-3 text-lg font-bold text-gray-900">
-            My tours
-          </h2>
+          <div className="mt-10 mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900">My tours</h2>
+            <Link
+              href="/guide/tours"
+              className="text-sm font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              View all →
+            </Link>
+          </div>
           {d.tours.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
               You haven&apos;t been assigned to any tours yet. A lead guide or
