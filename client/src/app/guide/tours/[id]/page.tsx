@@ -34,10 +34,10 @@ export default function TourRosterPage({
         subtitle="Confirmed guests by departure date"
         action={
           <Link
-            href="/guide"
+            href="/guide/tours"
             className="text-sm font-semibold text-emerald-700"
           >
-            ← Back to overview
+            ← Back to my tours
           </Link>
         }
       />
