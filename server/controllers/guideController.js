@@ -15,8 +15,12 @@ const DAYS = [
   "sunday",
 ];
 
-/* Booking statuses a guide needs to see on a roster */
-const ROSTER_STATUSES = ["confirmed", "completed"];
+const rosterFilter = (now = new Date()) => ({
+  $or: [
+    { status: "confirmed" },
+    { status: "completed", startDate: { $lt: now } },
+  ],
+});
 
 const isLeadOrAdmin = (role) => role === "lead-guide" || role === "admin";
 
@@ -159,7 +163,7 @@ export const getTourRoster = catchAsync(async (req, res, next) => {
   /* No email, price or payment data: guides only need to run the trip */
   const bookings = await Booking.find({
     tour: tour._id,
-    status: { $in: ROSTER_STATUSES },
+    ...rosterFilter(),
   })
     .sort("startDate")
     .select("startDate guests status bookingReference user")
