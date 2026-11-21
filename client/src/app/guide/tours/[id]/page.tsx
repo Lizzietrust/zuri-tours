@@ -31,7 +31,7 @@ export default function TourRosterPage({
     <>
       <PageHeader
         title={data?.tour.name ?? "Guest roster"}
-        subtitle="Confirmed guests by departure date"
+        subtitle="Guests by departure date"
         action={
           <Link
             href="/guide/tours"
@@ -58,7 +58,7 @@ export default function TourRosterPage({
 
       {data && groups.length === 0 && (
         <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
-          No confirmed bookings yet.
+          No bookings yet.
         </p>
       )}
 
@@ -75,7 +75,9 @@ export default function TourRosterPage({
                 <h2 className="font-semibold text-gray-900">
                   {formatDate(day)}
                 </h2>
-                <Badge tone="green">{total} guests</Badge>
+                <Badge tone="green">
+                  {total} guest{total === 1 ? "" : "s"}
+                </Badge>
               </header>
               <ul className="divide-y divide-gray-100">
                 {bookings.map((b) => (
@@ -85,11 +87,11 @@ export default function TourRosterPage({
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-gray-900">
-                        {b.user?.name ?? "Guest"}
+                        Booked by {b.user?.name ?? "Guest"}
                       </p>
                       <p className="text-xs text-gray-500">
-                        Ref {b.bookingReference ?? b._id.slice(-6)} · {b.guests}{" "}
-                        guest{b.guests === 1 ? "" : "s"}
+                        Booking ref: {b.bookingReference ?? b._id.slice(-6)} ·
+                        party of {b.guests}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
