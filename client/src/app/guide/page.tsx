@@ -19,9 +19,19 @@ function Tile({
 }) {
   const body = (
     <>
-      <span aria-hidden className="text-xl">
-        {icon}
-      </span>
+      <div className="flex items-start justify-between">
+        <span aria-hidden className="text-xl">
+          {icon}
+        </span>
+        {href && (
+          <span
+            aria-hidden
+            className="text-sm font-semibold text-emerald-600 transition group-hover:translate-x-0.5"
+          >
+            →
+          </span>
+        )}
+      </div>
       <div className="mt-2 text-2xl font-extrabold text-gray-900">{value}</div>
       <div className="text-xs font-medium text-gray-500">{label}</div>
     </>
@@ -38,7 +48,7 @@ function Tile({
   return (
     <Link
       href={href}
-      className="block rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+      className="group block rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
     >
       {body}
     </Link>
