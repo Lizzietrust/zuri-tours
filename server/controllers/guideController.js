@@ -151,7 +151,10 @@ export const getTourRoster = catchAsync(async (req, res, next) => {
   if (!me) return next(new AppError("User not found", 404));
 
   const tour = await Tour.findOne({ _id: req.params.id, isActive: true })
-    .select("name slug startDates")
+    .select(
+      "name slug imageCover startDates duration maxGroupSize difficulty startLocation guides",
+    )
+    .populate({ path: "guides", select: "name photo role" })
     .lean();
 
   if (!tour) return next(new AppError("Tour not found", 404));
@@ -160,19 +163,42 @@ export const getTourRoster = catchAsync(async (req, res, next) => {
     return next(new AppError("You are not assigned to this tour", 403));
   }
 
+  const now = new Date();
+
   /* No email, price or payment data: guides only need to run the trip */
   const bookings = await Booking.find({
     tour: tour._id,
-    ...rosterFilter(),
+    ...rosterFilter(now),
   })
     .sort("startDate")
     .select("startDate guests status bookingReference user")
     .populate({ path: "user", select: "name photo phoneNumber" })
     .lean();
 
+  const upcoming = bookings.filter((b) => new Date(b.startDate) >= now);
+  const upcomingDates = new Set(
+    upcoming.map((b) => new Date(b.startDate).toISOString()),
+  );
+
+  const nextDeparture =
+    (tour.startDates || [])
+      .map((d) => new Date(d))
+      .filter((d) => d >= now)
+      .sort((a, b) => a - b)[0] ?? null;
+
+  const stats = {
+    totalBookings: bookings.length,
+    totalGuests: bookings.reduce((s, b) => s + (b.guests || 0), 0),
+    upcomingBookings: upcoming.length,
+    upcomingGuests: upcoming.reduce((s, b) => s + (b.guests || 0), 0),
+    upcomingDepartures: upcomingDates.size,
+    completedBookings: bookings.filter((b) => b.status === "completed").length,
+    nextDeparture,
+  };
+
   res.status(200).json({
     status: "success",
-    data: { tour, bookings },
+    data: { tour, bookings, stats },
   });
 });
 
