@@ -15,6 +15,17 @@ const DAYS = [
   "sunday",
 ];
 
+/* Matches Date#getUTCDay(): 0 = Sunday */
+const WEEKDAY_BY_INDEX = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
 const rosterFilter = (now = new Date()) => ({
   $or: [
     { status: "confirmed" },
@@ -124,6 +135,13 @@ export const getGuideDashboard = catchAsync(async (req, res, next) => {
 
   departures.sort((a, b) => a.startDate - b.startDate);
 
+  /* Upcoming departures per weekday (all of them, not just the 8 shown) */
+  const departureDays = Object.fromEntries(DAYS.map((d) => [d, 0]));
+
+  departures.forEach((dep) => {
+    departureDays[WEEKDAY_BY_INDEX[new Date(dep.startDate).getUTCDay()]] += 1;
+  });
+
   res.status(200).json({
     status: "success",
     data: {
@@ -137,6 +155,7 @@ export const getGuideDashboard = catchAsync(async (req, res, next) => {
       departures: departures.slice(0, 8),
       tours: tourSummaries,
       availability: me.availability ?? {},
+      departureDays,
     },
   });
 });
