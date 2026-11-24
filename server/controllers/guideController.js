@@ -266,27 +266,76 @@ export const updateMyAvailability = catchAsync(async (req, res, next) => {
    ============================================================ */
 
 export const getTeam = catchAsync(async (_req, res) => {
+  const now = new Date();
+
   const [guides, tours] = await Promise.all([
     User.find({ role: { $in: ["guide", "lead-guide"] } })
-      .select("name email photo role")
+      .select("name email photo role availability")
       .sort("name")
       .lean(),
     Tour.find({ isActive: true })
-      .select("name slug guides")
+      .select("name slug imageCover startDates maxGroupSize guides")
       .sort("name")
       .lean(),
   ]);
 
+  const tourIds = tours.map((t) => t._id);
+
+  /* Confirmed guests still to come, per tour */
+  const booked = tourIds.length
+    ? await Booking.aggregate([
+        {
+          $match: {
+            tour: { $in: tourIds },
+            status: "confirmed",
+            startDate: { $gte: now },
+          },
+        },
+        { $group: { _id: "$tour", guests: { $sum: "$guests" } } },
+      ])
+    : [];
+
+  const guestsByTour = new Map(booked.map((b) => [String(b._id), b.guests]));
+
   res.status(200).json({
     status: "success",
     data: {
-      guides,
-      tours: tours.map((t) => ({
-        _id: t._id,
-        name: t.name,
-        slug: t.slug,
-        guides: (t.guides || []).map(String),
+      guides: guides.map((g) => ({
+        _id: g._id,
+        name: g.name,
+        email: g.email,
+        photo: g.photo,
+        role: g.role,
+        availability: g.availability ?? {},
       })),
+      tours: tours.map((t) => {
+        const upcoming = (t.startDates || [])
+          .map((d) => new Date(d))
+          .filter((d) => d >= now)
+          .sort((a, b) => a - b);
+
+        /* Upcoming departures per weekday, so the UI can compare with guide availability */
+        const departureDays = {};
+
+        upcoming.forEach((d) => {
+          const day = WEEKDAY_BY_INDEX[d.getUTCDay()];
+
+          departureDays[day] = (departureDays[day] || 0) + 1;
+        });
+
+        return {
+          _id: t._id,
+          name: t.name,
+          slug: t.slug,
+          imageCover: t.imageCover,
+          maxGroupSize: t.maxGroupSize,
+          guides: (t.guides || []).map(String),
+          upcomingDepartures: upcoming.length,
+          upcomingGuests: guestsByTour.get(String(t._id)) ?? 0,
+          nextDeparture: upcoming[0] ?? null,
+          departureDays,
+        };
+      }),
     },
   });
 });
