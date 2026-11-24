@@ -40,6 +40,8 @@ export type GuideDashboard = {
   departures: Departure[];
   tours: GuideTourSummary[];
   availability: Partial<Availability>;
+  /* Upcoming departures per weekday, across all assigned tours */
+  departureDays?: Partial<Record<keyof Availability, number>>;
 };
 
 export type RosterBooking = {
