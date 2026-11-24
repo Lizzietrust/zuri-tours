@@ -4,6 +4,8 @@ import {
   guideService,
   type Availability,
   type GuideDashboard,
+  type SetTourGuidePayload,
+  type TeamData,
 } from "@/services/guide";
 
 const errMsg = (err: unknown, fallback: string) =>
@@ -44,21 +46,79 @@ export const useUpdateAvailability = () => {
   });
 };
 
-export const useGuideTeam = () =>
-  useQuery({ queryKey: ["guide", "team"], queryFn: guideService.team });
+/* Pass `enabled = false` for users who must not call the lead-guide endpoint */
+export const useGuideTeam = (enabled = true) =>
+  useQuery({
+    queryKey: ["guide", "team"],
+    queryFn: guideService.team,
+    enabled,
+  });
+
+const TEAM_KEY = ["guide", "team"] as const;
 
 export const useSetTourGuide = () => {
   const qc = useQueryClient();
 
   return useMutation({
     mutationFn: guideService.setTourGuide,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["guide"] });
-      toast.success("Assignment updated");
+
+    /* Optimistic update: the UI changes instantly, the server has the final say */
+    onMutate: async (vars: SetTourGuidePayload) => {
+      await qc.cancelQueries({ queryKey: TEAM_KEY });
+
+      const previous = qc.getQueryData<TeamData>(TEAM_KEY);
+      const previousGuides =
+        previous?.tours.find((t) => t._id === vars.tourId)?.guides ?? null;
+
+      qc.setQueryData<TeamData>(TEAM_KEY, (old) =>
+        old
+          ? {
+              ...old,
+              tours: old.tours.map((t) =>
+                t._id !== vars.tourId
+                  ? t
+                  : {
+                      ...t,
+                      guides:
+                        vars.action === "assign"
+                          ? t.guides.includes(vars.guideId)
+                            ? t.guides
+                            : [...t.guides, vars.guideId]
+                          : t.guides.filter((g) => g !== vars.guideId),
+                    },
+              ),
+            }
+          : old,
+      );
+
+      return { previousGuides };
     },
-    onError: (err) =>
+
+    onError: (err, vars, ctx) => {
+      /* Roll back only the tour that failed */
+      if (ctx?.previousGuides) {
+        qc.setQueryData<TeamData>(TEAM_KEY, (old) =>
+          old
+            ? {
+                ...old,
+                tours: old.tours.map((t) =>
+                  t._id === vars.tourId
+                    ? { ...t, guides: ctx.previousGuides as string[] }
+                    : t,
+                ),
+              }
+            : old,
+        );
+      }
+
       toast.error("Couldn't update assignment", {
         description: errMsg(err, "Something went wrong"),
-      }),
+      });
+    },
+
+    onSuccess: (res) => toast.success(res?.message ?? "Assignment updated"),
+
+    /* Always re-sync with the server (also refreshes dashboard and rosters) */
+    onSettled: () => qc.invalidateQueries({ queryKey: ["guide"] }),
   });
 };
