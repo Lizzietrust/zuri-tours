@@ -1,6 +1,5 @@
 import { api } from "@/lib/api";
 
-
 export type Availability = Record<
   | "monday"
   | "tuesday"
@@ -52,9 +51,40 @@ export type RosterBooking = {
   user?: { name?: string; photo?: string; phoneNumber?: string } | null;
 };
 
+export type RosterGuide = {
+  _id: string;
+  name: string;
+  photo?: string;
+  role?: string;
+};
+
+export type RosterTour = {
+  _id: string;
+  name: string;
+  slug: string;
+  imageCover?: string;
+  startDates?: string[];
+  duration?: number;
+  maxGroupSize?: number;
+  difficulty?: string;
+  startLocation?: { description?: string; address?: string } | null;
+  guides?: RosterGuide[];
+};
+
+export type RosterStats = {
+  totalBookings: number;
+  totalGuests: number;
+  upcomingBookings: number;
+  upcomingGuests: number;
+  upcomingDepartures: number;
+  completedBookings: number;
+  nextDeparture: string | null;
+};
+
 export type TourRoster = {
-  tour: { _id: string; name: string; slug: string };
+  tour: RosterTour;
   bookings: RosterBooking[];
+  stats: RosterStats;
 };
 
 export type TeamData = {
