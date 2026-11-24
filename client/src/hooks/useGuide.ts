@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { guideService, type Availability } from "@/services/guide";
+import {
+  guideService,
+  type Availability,
+  type GuideDashboard,
+} from "@/services/guide";
 
 const errMsg = (err: unknown, fallback: string) =>
   (err as { message?: string })?.message || fallback;
@@ -24,7 +28,11 @@ export const useUpdateAvailability = () => {
   return useMutation({
     mutationFn: (p: Partial<Availability>) =>
       guideService.updateAvailability(p),
-    onSuccess: () => {
+    onSuccess: (availability) => {
+      /* Update the cache right away so the form never flashes old values */
+      qc.setQueryData<GuideDashboard>(["guide", "dashboard"], (old) =>
+        old ? { ...old, availability } : old,
+      );
       qc.invalidateQueries({ queryKey: ["guide", "dashboard"] });
       qc.invalidateQueries({ queryKey: ["me"] });
       toast.success("Availability saved");
