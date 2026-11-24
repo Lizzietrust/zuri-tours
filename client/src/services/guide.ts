@@ -89,9 +89,38 @@ export type TourRoster = {
   stats: RosterStats;
 };
 
+export type TeamGuide = {
+  _id: string;
+  name: string;
+  email: string;
+  photo?: string;
+  role: string;
+  availability?: Partial<Availability>;
+};
+
+export type TeamTour = {
+  _id: string;
+  name: string;
+  slug: string;
+  imageCover?: string;
+  maxGroupSize?: number;
+  guides: string[];
+  upcomingDepartures?: number;
+  upcomingGuests?: number;
+  nextDeparture?: string | null;
+  /* Upcoming departures per weekday */
+  departureDays?: Partial<Record<keyof Availability, number>>;
+};
+
 export type TeamData = {
-  guides: { _id: string; name: string; email: string; role: string }[];
-  tours: { _id: string; name: string; slug: string; guides: string[] }[];
+  guides: TeamGuide[];
+  tours: TeamTour[];
+};
+
+export type SetTourGuidePayload = {
+  tourId: string;
+  guideId: string;
+  action: "assign" | "unassign";
 };
 
 export const guideService = {
@@ -108,11 +137,9 @@ export const guideService = {
 
   team: async (): Promise<TeamData> => (await api.get("/guide/team")).data.data,
 
-  setTourGuide: async (p: {
-    tourId: string;
-    guideId: string;
-    action: "assign" | "unassign";
-  }) =>
+  setTourGuide: async (
+    p: SetTourGuidePayload,
+  ): Promise<{ status: string; message?: string }> =>
     (
       await api.patch(`/guide/tours/${p.tourId}/guides`, {
         guideId: p.guideId,
