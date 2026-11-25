@@ -94,7 +94,7 @@ export default function AvailabilityPage() {
     <>
       <PageHeader
         title="Availability"
-        subtitle="Tell your lead guide which days of the week you can work"
+        subtitle="Set the days of the week you're available to work"
       />
 
       {isLoading && (
@@ -171,8 +171,8 @@ export default function AvailabilityPage() {
                         `${label} (${departureDays[key] ?? 0})`,
                     )
                     .join(", ")}
-                  . Your lead guide may need to reassign these, so let them know
-                  early.
+                  . You may need to reassign these departures or adjust your
+                  availability.
                 </p>
               </div>
             )}
@@ -292,16 +292,16 @@ export default function AvailabilityPage() {
               </h2>
               <ul className="mt-3 list-disc space-y-2 pl-5">
                 <li>
-                  Your lead guide uses this to decide which departures to assign
-                  you to.
+                  Your availability is used when deciding which departures can
+                  be assigned to you.
                 </li>
                 <li>
                   Switching a day off does not remove you from tours you&apos;re
-                  already assigned to.
+                  already assigned to. Reassign those separately if needed.
                 </li>
                 <li>
-                  This is a weekly pattern. Tell your lead guide directly about
-                  one-off days off.
+                  This is a weekly pattern. For one-off days off, reassign the
+                  affected departures directly.
                 </li>
               </ul>
             </section>
